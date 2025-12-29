@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Matter.js Catapult Test</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: #14151f;
+            font-family: Arial, sans-serif;
+        }
+        canvas {
+            background: #0f0f13;
+        }
+        .controls {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            z-index: 1000;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            background: #4a90e2;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            margin-right: 10px;
+        }
+        button:hover {
+            background: #357abd;
+        }
+    </style>
+</head>
+<body>
+    <div class="controls">
+        <button id="playBtn">Play</button>
+        <button id="pauseBtn" style="display: none;">Pause</button>
+    </div>
+    <script src="js/matter.min.js"></script>
+    <script>
+        var Engine = Matter.Engine,
+            Render = Matter.Render,
+            Runner = Matter.Runner,
+            Composites = Matter.Composites,
+            Constraint = Matter.Constraint,
+            MouseConstraint = Matter.MouseConstraint,
+            Mouse = Matter.Mouse,
+            Composite = Matter.Composite,
+            Bodies = Matter.Bodies,
+            Body = Matter.Body,
+            Vector = Matter.Vector;
+
+        // create engine
+        var engine = Engine.create(),
+            world = engine.world;
+
+        // create renderer
+        var render = Render.create({
+            element: document.body,
+            engine: engine,
+            options: {
+                width: 800,
+                height: 600,
+                showAngleIndicator: true,
+                showCollisions: true,
+                showVelocity: true
+            }
+        });
+
+        Render.run(render);
+
+        // create runner
+        var runner = Runner.create();
+        // Start paused - don't run the runner yet
+        // Runner.run(runner, engine);
+
+        var isPaused = true;
+
+        // Play/Pause buttons
+        document.getElementById('playBtn').addEventListener('click', function() {
+            if (isPaused) {
+                Runner.run(runner, engine);
+                isPaused = false;
+                document.getElementById('playBtn').style.display = 'none';
+                document.getElementById('pauseBtn').style.display = 'inline-block';
+            }
+        });
+
+        document.getElementById('pauseBtn').addEventListener('click', function() {
+            if (!isPaused) {
+                Runner.stop(runner);
+                isPaused = true;
+                document.getElementById('pauseBtn').style.display = 'none';
+                document.getElementById('playBtn').style.display = 'inline-block';
+            }
+        });
+
+        var group = Body.nextGroup(true);
+
+        var stack = Composites.stack(250, 255, 1, 1, 0, 0, function(x, y) {
+            return Bodies.rectangle(x, y, 30, 30);
+        });
+
+        // arm 
+        catapult_arm_length = 320;
+        catapult_arm_width = 20;
+        var catapult = Bodies.rectangle(400, 320, catapult_arm_length, catapult_arm_width, { 
+            collisionFilter: { group: group } 
+        });
+
+
+        // counterweight
+        var counterweight = Bodies.circle(560 - (catapult_arm_length * .1), 280 + 50 - (catapult_arm_width/2), 50, { density: 0.05, collisionFilter: { group: group } });
+
+        Composite.add(world, [
+            stack,
+            catapult,
+            counterweight,
+
+            // Ground
+            Bodies.rectangle(400, 600, 800, 50.5, { 
+                isStatic: true, 
+                render: { fillStyle: '#060a19' } 
+            }),
+
+            // left shim 
+            Bodies.rectangle(250, 555, 20, 50, { 
+                isStatic: true, 
+                render: { fillStyle: '#060a19' } 
+            }),
+
+            // vertical frame
+            Bodies.rectangle(400, 435, 20, 280, { 
+                isStatic: true, 
+                collisionFilter: { group: group }, 
+                render: { fillStyle: '#060a19' } 
+            }),
+            
+            // pivot constraint
+            Constraint.create({ 
+                bodyA: catapult,
+                pointB: Vector.clone(catapult.position),
+                stiffness: 1,
+                length: 0
+            }),
+
+            // counterweight constraint
+            Constraint.create({ 
+                bodyA: counterweight,
+                bodyB: catapult,
+                pointB: { x: catapult_arm_length / 2 - 20, y: 0},
+                stiffness: 1,
+                length: 0
+            }),
+
+        ]);
+
+        // add mouse control
+        var mouse = Mouse.create(render.canvas),
+            mouseConstraint = MouseConstraint.create(engine, {
+                mouse: mouse,
+                constraint: {
+                    stiffness: 0.2,
+                    render: {
+                        visible: false
+                    }
+                }
+            });
+
+        Composite.add(world, mouseConstraint);
+
+        // keep the mouse in sync with rendering
+        render.mouse = mouse;
+
+        // fit the render viewport to the scene
+        Render.lookAt(render, {
+            min: { x: 0, y: 0 },
+            max: { x: 800, y: 600 }
+        });
+    </script>
+</body>
+</html>
