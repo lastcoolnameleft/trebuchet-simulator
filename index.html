@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Advanced Trebuchet Simulator</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Advanced Trebuchet Simulator</h1>
+            <p>Explore different trebuchet designs and customize their parameters</p>
+        </header>
+
+        <div class="main-content">
+            <!-- Canvas for physics simulation -->
+            <div class="canvas-container">
+                <canvas id="simulationCanvas"></canvas>
+                <div class="controls">
+                    <button id="fireBtn" class="btn btn-primary">Fire!</button>
+                    <button id="resetBtn" class="btn btn-secondary">Reset</button>
+                    <button id="pauseBtn" class="btn btn-secondary">Pause</button>
+                </div>
+            </div>
+
+            <!-- Sidebar for trebuchet selection and customization -->
+            <div class="sidebar">
+                <section class="section">
+                    <h2>Trebuchet Type</h2>
+                    <div class="trebuchet-types">
+                        <button class="type-btn active" data-type="hinged">Hinged Counterweight</button>
+                        <button class="type-btn" data-type="whipper">Whipper</button>
+                        <button class="type-btn" data-type="floating">Floating Arm</button>
+                        <button class="type-btn" data-type="walking">Walking Arm</button>
+                    </div>
+                </section>
+
+                <section class="section">
+                    <h2>Customize Parameters</h2>
+                    <div class="parameters">
+                        <div class="param-group">
+                            <label for="armLength">Arm Length (m)</label>
+                            <input type="range" id="armLength" min="2" max="10" step="0.5" value="6">
+                            <span class="value" id="armLengthValue">6</span>
+                        </div>
+
+                        <div class="param-group">
+                            <label for="counterweightMass">Counterweight Mass (kg)</label>
+                            <input type="range" id="counterweightMass" min="50" max="500" step="10" value="200">
+                            <span class="value" id="counterweightMassValue">200</span>
+                        </div>
+
+                        <div class="param-group">
+                            <label for="counterweightSize">Counterweight Size (m)</label>
+                            <input type="range" id="counterweightSize" min="0.5" max="2" step="0.1" value="1">
+                            <span class="value" id="counterweightSizeValue">1</span>
+                        </div>
+
+                        <div class="param-group">
+                            <label for="projectileMass">Projectile Mass (kg)</label>
+                            <input type="range" id="projectileMass" min="1" max="50" step="1" value="10">
+                            <span class="value" id="projectileMassValue">10</span>
+                        </div>
+
+                        <div class="param-group">
+                            <label for="projectileSize">Projectile Size (m)</label>
+                            <input type="range" id="projectileSize" min="0.1" max="0.5" step="0.05" value="0.2">
+                            <span class="value" id="projectileSizeValue">0.2</span>
+                        </div>
+
+                        <div class="param-group">
+                            <label for="slingLength">Sling Length (m)</label>
+                            <input type="range" id="slingLength" min="2" max="8" step="0.5" value="4">
+                            <span class="value" id="slingLengthValue">4</span>
+                        </div>
+
+                        <div class="param-group">
+                            <label for="armMass">Arm Mass (kg)</label>
+                            <input type="range" id="armMass" min="10" max="100" step="5" value="30">
+                            <span class="value" id="armMassValue">30</span>
+                        </div>
+
+                        <div class="param-group">
+                            <label for="releaseAngle">Release Angle (degrees)</label>
+                            <input type="range" id="releaseAngle" min="30" max="60" step="5" value="45">
+                            <span class="value" id="releaseAngleValue">45</span>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="section stats">
+                    <h2>Statistics</h2>
+                    <div class="stat-item">
+                        <span>Distance:</span>
+                        <span id="distanceValue">0 m</span>
+                    </div>
+                    <div class="stat-item">
+                        <span>Max Height:</span>
+                        <span id="heightValue">0 m</span>
+                    </div>
+                    <div class="stat-item">
+                        <span>Time:</span>
+                        <span id="timeValue">0 s</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+    <script src="trebuchet.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
