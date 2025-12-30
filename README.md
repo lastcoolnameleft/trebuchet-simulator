@@ -1,6 +1,6 @@
 # Advanced Trebuchet Simulator
 
-An interactive web-based trebuchet simulator built with Matter.js physics engine, supporting multiple trebuchet designs with fully customizable parameters.
+An interactive web-based trebuchet simulator built with Planck.js physics engine, supporting multiple trebuchet designs with fully customizable parameters.
 
 ## Features
 
@@ -59,15 +59,15 @@ To host this simulator online, you can use any of these free static hosting serv
 ## Technical Details
 
 ### Built With
-- **Matter.js**: 2D physics engine for realistic simulation
+- **Planck.js**: 2D Box2D physics engine for realistic simulation
 - **Vanilla JavaScript**: No frameworks required
 - **HTML5 Canvas**: For rendering the simulation
 - **CSS3**: Modern, responsive design
 
 ### Physics Simulation
-The simulator uses Matter.js to accurately model:
+The simulator uses Planck.js to accurately model:
 - Rigid body dynamics
-- Constraint systems (hinges, pivots, ropes)
+- Constraint systems (revolute joints, distance joints)
 - Collision detection
 - Gravitational forces
 - Angular momentum and rotation
@@ -81,12 +81,26 @@ Works in all modern browsers that support:
 ## Project Structure
 ```
 trebuchet-simulator/
-├── index.html          # Main HTML structure
-├── styles.css          # Styling and layout
-├── trebuchet.js        # Physics simulation and trebuchet types
-├── app.js             # UI logic and event handlers
-└── README.md          # This file
+├── index.html                    # Main HTML structure
+├── styles.css                    # Styling and layout
+├── planck.min.js                # Planck.js physics engine
+├── trebuchets/                   # Trebuchet type implementations
+│   ├── base-trebuchet.js        # Base class for trebuchet builders
+│   ├── hinged-trebuchet.js      # Hinged counterweight trebuchet
+│   ├── whipper-trebuchet.js     # Whipper trebuchet implementation
+│   ├── floating-arm-trebuchet.js # Floating arm trebuchet
+│   └── walking-arm-trebuchet.js  # Walking arm trebuchet
+├── trebuchet.js                 # Main simulator and physics engine
+├── app.js                       # UI logic and event handlers
+└── README.md                    # This file
 ```
+
+### Code Architecture
+The project uses an object-oriented design with a base builder class:
+- **BaseTrebuchetBuilder**: Abstract base class with common methods for creating trebuchet components
+- **Specific Builders**: Each trebuchet type extends the base class with its unique build logic
+- **TrebuchetSimulator**: Main class that manages physics engine and coordinates with builders
+- **Separation of Concerns**: Each trebuchet type is in its own file for better maintainability
 
 ## Future Enhancements
 - Add trajectory visualization trails

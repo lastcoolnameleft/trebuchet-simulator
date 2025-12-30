@@ -160,14 +160,32 @@ header p {
 
 .param-group {
     display: flex;
-    flex-direction: column;
-    gap: 5px;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
 }
 
 .param-group label {
     font-size: 14px;
     font-weight: 500;
     color: #555;
+    flex: 1;
+}
+
+.param-group input[type="number"] {
+    width: 80px;
+    padding: 5px 8px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 14px;
+    text-align: right;
+}
+
+.param-group .unit {
+    font-size: 14px;
+    color: #555;
+    min-width: 30px;
 }
 
 .param-group input[type="range"] {

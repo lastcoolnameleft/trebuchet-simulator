@@ -44,6 +44,7 @@
     <div class="controls">
         <button id="playBtn">Play</button>
         <button id="pauseBtn" style="display: none;">Pause</button>
+        <button id="resetBtn">Reset</button>
     </div>
     <script src="js/matter.min.js"></script>
     <script>
@@ -64,14 +65,21 @@
             world = engine.world;
 
         // create renderer
+        var engine_height = 600;
+        var engine_width = 800;
+
         var render = Render.create({
             element: document.body,
             engine: engine,
             options: {
-                width: 800,
-                height: 600,
+                width: engine_width,
+                height: engine_height,
                 showAngleIndicator: true,
                 showCollisions: true,
+                showAxes: true,
+                showPositions: true,
+//                showDebug: true,
+//                showIds: true,
                 showVelocity: true
             }
         });
@@ -104,65 +112,218 @@
             }
         });
 
-        var group = Body.nextGroup(true);
+        // Reset button
+        document.getElementById('resetBtn').addEventListener('click', resetSimulation);
 
-        var stack = Composites.stack(250, 255, 1, 1, 0, 0, function(x, y) {
-            return Bodies.rectangle(x, y, 30, 30);
+        // Keyboard controls
+        document.addEventListener('keydown', function(event) {
+            // Spacebar - toggle pause/unpause
+            if (event.code === 'Space') {
+                event.preventDefault();
+                if (isPaused) {
+                    Runner.run(runner, engine);
+                    isPaused = false;
+                    document.getElementById('playBtn').style.display = 'none';
+                    document.getElementById('pauseBtn').style.display = 'inline-block';
+                } else {
+                    Runner.stop(runner);
+                    isPaused = true;
+                    document.getElementById('pauseBtn').style.display = 'none';
+                    document.getElementById('playBtn').style.display = 'inline-block';
+                }
+            }
+            // Enter - reset simulation
+            if (event.code === 'Enter') {
+                event.preventDefault();
+                resetSimulation();
+            }
         });
 
-        // arm 
-        catapult_arm_length = 320;
-        catapult_arm_width = 20;
-        var catapult = Bodies.rectangle(400, 320, catapult_arm_length, catapult_arm_width, { 
-            collisionFilter: { group: group } 
-        });
-
-
-        // counterweight
-        var counterweight = Bodies.circle(560 - (catapult_arm_length * .1), 280 + 50 - (catapult_arm_width/2), 50, { density: 0.05, collisionFilter: { group: group } });
-
-        Composite.add(world, [
-            stack,
-            catapult,
-            counterweight,
-
-            // Ground
-            Bodies.rectangle(400, 600, 800, 50.5, { 
-                isStatic: true, 
-                render: { fillStyle: '#060a19' } 
-            }),
-
-            // left shim 
-            Bodies.rectangle(250, 555, 20, 50, { 
-                isStatic: true, 
-                render: { fillStyle: '#060a19' } 
-            }),
-
-            // vertical frame
-            Bodies.rectangle(400, 435, 20, 280, { 
-                isStatic: true, 
-                collisionFilter: { group: group }, 
-                render: { fillStyle: '#060a19' } 
-            }),
+        // Build world function
+        var slingConstraint = null;  // Track sling constraint globally
+        var catapult = null;         // Track catapult globally for angle checking
+        var projectile = null;       // Track projectile globally
+        
+        // Configuration - easy to adjust
+        var config = {
+            // Dimensions
+            catapultArmLength: 320,
+            catapultArmWidth: 20,
+            counterweightRadius: 50,
+            projectileRadius: 15,
+            slingLength: 60,
             
-            // pivot constraint
-            Constraint.create({ 
+            // Positioning (as fractions of width/height or relative values)
+            pivotX: engine_width / 2,        // Center horizontally
+            pivotY: engine_height * 0.35,    // 35% down from top (moved up)
+            
+            // Physics
+            counterweightDensity: 0.1,
+            projectileDensity: 0.001,
+            counterweightAttachLength: 100,
+            
+            // Ground and frame
+            groundHeight: 50,
+            frameWidth: 20,
+            frameHeight: 450,
+            
+            // Release
+            releaseAngle: -0.5  // radians (-28 degrees)
+        };
+        
+        function buildWorld() {
+            var group = Body.nextGroup(true);
+
+            // Calculate positions based on config
+            var armLeft = config.pivotX - (config.catapultArmLength / 2);
+            var armRight = config.pivotX + (config.catapultArmLength / 2);
+            var groundY = engine_height - config.groundHeight / 2;
+            
+            // projectile - positioned at short arm end with sling
+            projectile = Bodies.circle(
+                armLeft, 
+                config.pivotY + config.slingLength, 
+                config.projectileRadius, 
+                { 
+                    density: config.projectileDensity,
+                    render: { fillStyle: '#FF4500' }
+                }
+            );
+
+            // arm (catapult)
+            catapult = Bodies.rectangle(
+                config.pivotX, 
+                config.pivotY, 
+                config.catapultArmLength, 
+                config.catapultArmWidth, 
+                { 
+                    collisionFilter: { group: group },
+                    render: { fillStyle: '#D2691E' }
+                }
+            );
+
+            // counterweight - positioned at right end of arm
+            var counterweight = Bodies.circle(
+                armRight, 
+                config.pivotY + config.counterweightAttachLength, 
+                config.counterweightRadius, 
+                { 
+                    density: config.counterweightDensity, 
+                    collisionFilter: { group: group },
+                    render: { fillStyle: '#696969' }
+                }
+            );
+
+            // sling constraint - attach projectile to short arm end
+            slingConstraint = Constraint.create({
                 bodyA: catapult,
-                pointB: Vector.clone(catapult.position),
-                stiffness: 1,
-                length: 0
-            }),
+                bodyB: projectile,
+                pointA: { x: -(config.catapultArmLength / 2), y: 0 },  // Left end of arm
+                length: config.slingLength,
+                stiffness: 0.9,
+                render: { strokeStyle: '#8B4513', lineWidth: 2 }
+            });
 
-            // counterweight constraint
-            Constraint.create({ 
-                bodyA: counterweight,
-                bodyB: catapult,
-                pointB: { x: catapult_arm_length / 2 - 20, y: 0},
-                stiffness: 1,
-                length: 0
-            }),
+            Composite.add(world, [
+                projectile,
+                catapult,
+                counterweight,
 
-        ]);
+                // Ground
+                Bodies.rectangle(
+                    engine_width / 2, 
+                    groundY, 
+                    engine_width, 
+                    config.groundHeight, 
+                    { 
+                        isStatic: true, 
+                        render: { fillStyle: '#060a19' } 
+                    }
+                ),
+
+                // vertical frame
+                Bodies.rectangle(
+                    config.pivotX, 
+                    groundY - config.frameHeight / 2, 
+                    config.frameWidth, 
+                    config.frameHeight, 
+                    { 
+                        isStatic: true, 
+                        collisionFilter: { group: group }, 
+                        render: { fillStyle: '#060a19' } 
+                    }
+                ),
+                
+                // pivot constraint
+                Constraint.create({ 
+                    bodyA: catapult,
+                    pointB: Vector.clone(catapult.position),
+                    stiffness: 1,
+                    length: 0
+                }),
+
+                // counterweight constraint
+                Constraint.create({ 
+                    bodyA: counterweight,
+                    bodyB: catapult,
+                    pointB: { x: config.catapultArmLength / 2, y: 0},
+                    stiffness: 1,
+                    length: config.counterweightAttachLength
+                }),
+
+                // sling constraint
+                slingConstraint
+
+            ]);
+        }
+
+        // Release angle tracking
+        var slingReleased = false;
+
+        // Check angle and release sling
+        Matter.Events.on(engine, 'beforeUpdate', function() {
+            if (slingConstraint && !slingReleased && catapult) {
+                // Debug: Log the angle every 60 frames
+                if (engine.timing.timestamp % 1000 < 16) {
+                    console.log('Catapult angle:', catapult.angle, 'Release at:', config.releaseAngle);
+                }
+                
+                // Check if catapult has rotated past release angle
+                // Negative angle means counterclockwise rotation (swinging up)
+                if (catapult.angle < config.releaseAngle) {
+                    console.log('RELEASING SLING at angle:', catapult.angle);
+                    Composite.remove(world, slingConstraint);
+                    slingConstraint = null;
+                    slingReleased = true;
+                }
+            }
+        });
+
+        // Reset function
+        function resetSimulation() {
+            // Stop runner if running
+            if (!isPaused) {
+                Runner.stop(runner);
+            }
+            
+            // Clear the world
+            Composite.clear(world, false);
+            
+            // Reset sling state
+            slingConstraint = null;
+            slingReleased = false;
+            
+            // Rebuild the world
+            buildWorld();
+            
+            // Reset to paused state
+            isPaused = true;
+            document.getElementById('pauseBtn').style.display = 'none';
+            document.getElementById('playBtn').style.display = 'inline-block';
+        }
+
+        // Initial build
+        buildWorld();
 
         // add mouse control
         var mouse = Mouse.create(render.canvas),
@@ -184,7 +345,7 @@
         // fit the render viewport to the scene
         Render.lookAt(render, {
             min: { x: 0, y: 0 },
-            max: { x: 800, y: 600 }
+            max: { x: engine_width, y: engine_height }
         });
     </script>
 </body>

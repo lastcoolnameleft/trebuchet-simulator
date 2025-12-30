@@ -1,92 +1,192 @@
-// Trebuchet Simulator using Matter.js
-// This module handles the physics simulation and trebuchet construction
+// Trebuchet Simulator using Planck.js
+// Main simulator class that coordinates physics and trebuchet construction
 
 const SCALE = 20; // pixels per meter
 
 class TrebuchetSimulator {
     constructor(canvas) {
         this.canvas = canvas;
+        this.ctx = canvas.getContext('2d');
         this.setupPhysics();
-        this.trebuchetType = 'hinged';
+        this.trebuchetType = 'sandbox';
         this.parameters = this.getDefaultParameters();
         this.fired = false;
-        this.paused = false;
+        this.paused = true; // Start paused
         this.stats = { distance: 0, maxHeight: 0, time: 0 };
         this.projectileTrajectory = [];
+        this.animationId = null;
+        this.projectileHitGround = false; // Track if projectile hit ground
+        // Initialize trebuchet builders
+        this.builders = {
+            hinged: new HingedTrebuchetBuilder(this),
+            whipper: new WhipperTrebuchetBuilder(this),
+            floating: new FloatingArmTrebuchetBuilder(this),
+            walking: new WalkingArmTrebuchetBuilder(this),
+            sandbox: new SandboxTrebuchetBuilder(this)
+        };
     }
 
     setupPhysics() {
-        // Create engine
-        this.engine = Matter.Engine.create();
-        this.world = this.engine.world;
-        this.world.gravity.y = 1; // Matter.js default gravity
-
-        // Create renderer
-        const rect = this.canvas.getBoundingClientRect();
-        this.render = Matter.Render.create({
-            canvas: this.canvas,
-            engine: this.engine,
-            options: {
-                width: rect.width,
-                height: rect.height,
-                wireframes: false,
-                background: 'transparent'
+        // Create world with Planck.js
+        this.world = planck.World({
+            gravity: planck.Vec2(0, 10) // 10 m/s² gravity
+        });
+        
+        // Setup collision listener to detect projectile hitting ground
+        this.world.on('begin-contact', (contact) => {
+            const fixtureA = contact.getFixtureA();
+            const fixtureB = contact.getFixtureB();
+            const bodyA = fixtureA.getBody();
+            const bodyB = fixtureB.getBody();
+            
+            // Check if projectile hit ground
+            if ((bodyA === this.projectile && bodyB === this.ground) ||
+                (bodyB === this.projectile && bodyA === this.ground)) {
+                if (!this.projectileHitGround) {
+                    this.projectileHitGround = true;
+                    // Stop the projectile
+                    if (this.projectile) {
+                        this.projectile.setLinearVelocity(planck.Vec2(0, 0));
+                        this.projectile.setAngularVelocity(0);
+                        this.projectile.setType('static');
+                    }
+                }
             }
         });
+        
+        // Canvas dimensions
+        const rect = this.canvas.getBoundingClientRect();
+        this.canvas.width = rect.width;
+        this.canvas.height = rect.height;
 
-        // Create ground
-        const ground = Matter.Bodies.rectangle(
-            rect.width / 2, 
-            rect.height - 10, 
-            rect.width, 
-            20, 
-            { 
-                isStatic: true,
-                render: {
-                    fillStyle: '#654321'
+        // Create ground (thin ground layer extended to the left)
+        const groundHalfHeight = 0.5; // Thinner ground (was 2.5)
+        const groundHalfWidth = rect.width / SCALE; // Double width to extend left
+        const groundCenterX = rect.width / 2 / SCALE; // Keep center at canvas middle
+        const groundBody = this.world.createBody({
+            position: planck.Vec2(groundCenterX, (rect.height - groundHalfHeight) / SCALE)
+        });
+        groundBody.createFixture({
+            shape: planck.Box(groundHalfWidth, groundHalfHeight),
+            friction: 0.5,
+            userData: { color: '#654321' }
+        });
+        this.ground = groundBody;
+        // Calculate ground top surface: ground center Y minus half-height
+        this.groundTop = (rect.height - groundHalfHeight) / SCALE - groundHalfHeight;
+
+        // Start animation loop
+        this.animate();
+    }
+
+    animate() {
+        if (!this.paused) {
+            this.world.step(1/60);
+            
+            // Check for sling release (when arm rotates clockwise past 1.5 radians, from planck.html)
+            if (this.slingJoint && this.trebuchetBodies && this.trebuchetBodies[1]) {
+                const arm = this.trebuchetBodies[1]; // Arm is second body
+                if (arm.getAngle() > 1.5) {
+                    this.world.destroyJoint(this.slingJoint);
+                    this.slingJoint = null;
+                    console.log('Sling released at angle:', arm.getAngle());
                 }
             }
-        );
-        Matter.World.add(this.world, ground);
-
-        // Start renderer
-        Matter.Render.run(this.render);
-
-        // Create runner
-        this.runner = Matter.Runner.create();
-        Matter.Runner.run(this.runner, this.engine);
-
-        // Add event listener for collision detection and tracking
-        Matter.Events.on(this.engine, 'afterUpdate', () => {
-            if (this.projectile && this.fired) {
-                const pos = this.projectile.position;
-                this.projectileTrajectory.push({ x: pos.x, y: pos.y });
+            
+            // Track projectile
+            if (this.projectile) {
+                const pos = this.projectile.getPosition();
+                this.projectileTrajectory.push({ x: pos.x * SCALE, y: pos.y * SCALE });
                 
-                // Update stats
-                const distance = (pos.x - this.startX) / SCALE;
-                const height = (this.startY - pos.y) / SCALE;
+                // Update stats - real-time accurate
+                // Distance from starting X position (in meters)
+                const distance = pos.x - this.startX;
                 
-                if (distance > this.stats.distance) {
-                    this.stats.distance = distance;
-                }
+                // Height above starting position (Y increases downward, so subtract)
+                const height = this.startY - pos.y;
+                
+                // Update max distance (always show current distance if projectile moved right)
+                this.stats.distance = Math.max(0, distance);
+                
+                // Update max height reached
                 if (height > this.stats.maxHeight) {
                     this.stats.maxHeight = height;
                 }
-                this.stats.time += 1/60; // Approximate time increment
+                
+                // Track time (only if projectile hasn't hit ground yet)
+                if (!this.projectileHitGround) {
+                    this.stats.time += 1/60;
+                }
             }
-        });
+        }
+        
+        this.render();
+        this.animationId = requestAnimationFrame(() => this.animate());
+    }
+
+    render() {
+        const rect = this.canvas.getBoundingClientRect();
+        this.ctx.fillStyle = '#0f0f13';
+        this.ctx.fillRect(0, 0, rect.width, rect.height);
+        
+        // Camera offset - shift view to the left
+        const cameraOffsetX = 200; // Negative value moves camera left (scene appears to move right)
+        
+        // Draw all bodies
+        for (let body = this.world.getBodyList(); body; body = body.getNext()) {
+            this.ctx.save();
+            const pos = body.getPosition();
+            this.ctx.translate(pos.x * SCALE + cameraOffsetX, pos.y * SCALE);
+            this.ctx.rotate(body.getAngle());
+            
+            for (let fixture = body.getFixtureList(); fixture; fixture = fixture.getNext()) {
+                const shape = fixture.getShape();
+                
+                if (shape.getType() === 'circle') {
+                    this.ctx.fillStyle = fixture.getUserData()?.color || '#8B4513';
+                    this.ctx.beginPath();
+                    this.ctx.arc(0, 0, shape.getRadius() * SCALE, 0, Math.PI * 2);
+                    this.ctx.fill();
+                } else if (shape.getType() === 'polygon') {
+                    const vertices = shape.m_vertices;
+                    this.ctx.fillStyle = fixture.getUserData()?.color || '#654321';
+                    this.ctx.beginPath();
+                    this.ctx.moveTo(vertices[0].x * SCALE, vertices[0].y * SCALE);
+                    for (let i = 1; i < vertices.length; i++) {
+                        this.ctx.lineTo(vertices[i].x * SCALE, vertices[i].y * SCALE);
+                    }
+                    this.ctx.closePath();
+                    this.ctx.fill();
+                }
+            }
+            this.ctx.restore();
+        }
+        
+        // Draw joints
+        this.ctx.strokeStyle = '#8B4513';
+        this.ctx.lineWidth = 2;
+        for (let joint = this.world.getJointList(); joint; joint = joint.getNext()) {
+            const anchorA = joint.getAnchorA();
+            const anchorB = joint.getAnchorB();
+            
+            this.ctx.beginPath();
+            this.ctx.moveTo(anchorA.x * SCALE + cameraOffsetX, anchorA.y * SCALE);
+            this.ctx.lineTo(anchorB.x * SCALE + cameraOffsetX, anchorB.y * SCALE);
+            this.ctx.stroke();
+        }
     }
 
     getDefaultParameters() {
         return {
-            armLength: 6,
+            armLength: 20,
             counterweightMass: 200,
             counterweightSize: 1,
             projectileMass: 10,
             projectileSize: 0.2,
             slingLength: 4,
             armMass: 30,
-            releaseAngle: 45
+            releaseAngle: 45,
+            armHeight: 13
         };
     }
 
@@ -94,554 +194,61 @@ class TrebuchetSimulator {
         // Clear existing trebuchet
         if (this.trebuchetBodies) {
             this.trebuchetBodies.forEach(body => {
-                Matter.World.remove(this.world, body);
+                this.world.destroyBody(body);
             });
         }
-        if (this.constraints) {
-            this.constraints.forEach(constraint => {
-                Matter.World.remove(this.world, constraint);
+        if (this.joints) {
+            this.joints.forEach(joint => {
+                this.world.destroyJoint(joint);
             });
         }
 
         this.trebuchetType = type;
         this.parameters = { ...this.getDefaultParameters(), ...params };
-        this.trebuchetBodies = [];
-        this.constraints = [];
-        this.fired = false;
-        this.projectileTrajectory = [];
+        this.fired = false;        this.projectileHitGround = false; // Reset hit ground flag        this.projectileTrajectory = [];
         this.stats = { distance: 0, maxHeight: 0, time: 0 };
 
         const rect = this.canvas.getBoundingClientRect();
-        const baseX = 200;
-        const baseY = rect.height - 50;
+        const baseX = 200 / SCALE;
+        const baseY = this.groundTop; // Use stored ground top position
 
-        switch (type) {
-            case 'hinged':
-                this.buildHingedTrebuchet(baseX, baseY);
-                break;
-            case 'whipper':
-                this.buildWhipperTrebuchet(baseX, baseY);
-                break;
-            case 'floating':
-                this.buildFloatingArmTrebuchet(baseX, baseY);
-                break;
-            case 'walking':
-                this.buildWalkingArmTrebuchet(baseX, baseY);
-                break;
+        // Use the appropriate builder
+        const builder = this.builders[type];
+        if (!builder) {
+            console.error(`Unknown trebuchet type: ${type}`);
+            return;
         }
-    }
 
-    buildHingedTrebuchet(baseX, baseY) {
-        const p = this.parameters;
-        const shortArmRatio = 0.3; // Short arm is 30% of total length
-        const longArmRatio = 0.7;  // Long arm is 70% of total length
-
-        // Base/Frame
-        const frame = Matter.Bodies.rectangle(
-            baseX, baseY, 20, 100,
-            { 
-                isStatic: true, 
-                render: { fillStyle: '#8B4513' }
-            }
-        );
-        this.trebuchetBodies.push(frame);
-
-        // Throwing arm (pivots at the fulcrum)
-        const armWidth = 15;
-        const arm = Matter.Bodies.rectangle(
-            baseX, baseY - 50, p.armLength * SCALE, armWidth,
-            { 
-                mass: p.armMass,
-                render: { fillStyle: '#D2691E' }
-            }
-        );
-        this.trebuchetBodies.push(arm);
-
-        // Pivot constraint at fulcrum (about 1/3 from counterweight end)
-        const pivotConstraint = Matter.Constraint.create({
-            bodyA: frame,
-            bodyB: arm,
-            pointA: { x: 0, y: -50 },
-            pointB: { x: -(p.armLength * longArmRatio - p.armLength / 2) * SCALE, y: 0 },
-            length: 0,
-            stiffness: 1
-        });
-        this.constraints.push(pivotConstraint);
-
-        // Counterweight (hinged)
-        const cwSize = p.counterweightSize * SCALE;
-        const counterweight = Matter.Bodies.rectangle(
-            baseX - (p.armLength * longArmRatio) * SCALE, 
-            baseY - 50 - 20, 
-            cwSize, cwSize,
-            {
-                mass: p.counterweightMass,
-                render: { fillStyle: '#696969' }
-            }
-        );
-        this.trebuchetBodies.push(counterweight);
-
-        // Hinge for counterweight
-        const cwHinge = Matter.Constraint.create({
-            bodyA: arm,
-            bodyB: counterweight,
-            pointA: { x: -(p.armLength * longArmRatio) * SCALE, y: 0 },
-            pointB: { x: 0, y: -cwSize / 2 },
-            length: 20,
-            stiffness: 0.8
-        });
-        this.constraints.push(cwHinge);
-
-        // Projectile
-        const projectileRadius = p.projectileSize * SCALE;
-        this.projectile = Matter.Bodies.circle(
-            baseX + (p.armLength * shortArmRatio) * SCALE,
-            baseY - 50 - p.slingLength * SCALE,
-            projectileRadius,
-            {
-                mass: p.projectileMass,
-                render: { fillStyle: '#FF4500' },
-                restitution: 0.6,
-                friction: 0.5
-            }
-        );
-        this.startX = this.projectile.position.x;
-        this.startY = this.projectile.position.y;
-        this.trebuchetBodies.push(this.projectile);
-
-        // Sling (two ropes)
-        const slingPoint = { x: (p.armLength * shortArmRatio) * SCALE, y: 0 };
+        const result = builder.build(baseX, baseY, this.parameters);
         
-        this.slingConstraint1 = Matter.Constraint.create({
-            bodyA: arm,
-            bodyB: this.projectile,
-            pointA: slingPoint,
-            length: p.slingLength * SCALE,
-            stiffness: 0.9,
-            render: { strokeStyle: '#8B4513', lineWidth: 2 }
-        });
-        
-        this.slingConstraint2 = Matter.Constraint.create({
-            bodyA: arm,
-            bodyB: this.projectile,
-            pointA: slingPoint,
-            length: p.slingLength * SCALE,
-            stiffness: 0.9,
-            render: { strokeStyle: '#8B4513', lineWidth: 2 }
-        });
-        
-        this.constraints.push(this.slingConstraint1, this.slingConstraint2);
-
-        // Add all bodies and constraints to world
-        Matter.World.add(this.world, this.trebuchetBodies);
-        Matter.World.add(this.world, this.constraints);
-    }
-
-    buildWhipperTrebuchet(baseX, baseY) {
-        const p = this.parameters;
-        
-        // Similar to hinged but with a second arm segment for whipping action
-        const shortArmRatio = 0.3;
-        const longArmRatio = 0.7;
-
-        // Base/Frame
-        const frame = Matter.Bodies.rectangle(
-            baseX, baseY, 20, 100,
-            { 
-                isStatic: true, 
-                render: { fillStyle: '#8B4513' }
-            }
-        );
-        this.trebuchetBodies.push(frame);
-
-        // Main throwing arm
-        const armWidth = 15;
-        const mainArm = Matter.Bodies.rectangle(
-            baseX, baseY - 50, p.armLength * SCALE, armWidth,
-            { 
-                mass: p.armMass * 0.7,
-                render: { fillStyle: '#D2691E' }
-            }
-        );
-        this.trebuchetBodies.push(mainArm);
-
-        // Pivot constraint
-        const pivotConstraint = Matter.Constraint.create({
-            bodyA: frame,
-            bodyB: mainArm,
-            pointA: { x: 0, y: -50 },
-            pointB: { x: -(p.armLength * longArmRatio - p.armLength / 2) * SCALE, y: 0 },
-            length: 0,
-            stiffness: 1
-        });
-        this.constraints.push(pivotConstraint);
-
-        // Counterweight
-        const cwSize = p.counterweightSize * SCALE;
-        const counterweight = Matter.Bodies.rectangle(
-            baseX - (p.armLength * longArmRatio) * SCALE, 
-            baseY - 50 - 20, 
-            cwSize, cwSize,
-            {
-                mass: p.counterweightMass,
-                render: { fillStyle: '#696969' }
-            }
-        );
-        this.trebuchetBodies.push(counterweight);
-
-        const cwHinge = Matter.Constraint.create({
-            bodyA: mainArm,
-            bodyB: counterweight,
-            pointA: { x: -(p.armLength * longArmRatio) * SCALE, y: 0 },
-            pointB: { x: 0, y: -cwSize / 2 },
-            length: 20,
-            stiffness: 0.8
-        });
-        this.constraints.push(cwHinge);
-
-        // Whipper arm (extends from main arm)
-        const whipperLength = p.armLength * 0.4;
-        const whipperArm = Matter.Bodies.rectangle(
-            baseX + (p.armLength * shortArmRatio) * SCALE + whipperLength * SCALE / 2,
-            baseY - 50,
-            whipperLength * SCALE, 12,
-            {
-                mass: p.armMass * 0.3,
-                render: { fillStyle: '#CD853F' }
-            }
-        );
-        this.trebuchetBodies.push(whipperArm);
-
-        // Joint between main arm and whipper
-        const whipperJoint = Matter.Constraint.create({
-            bodyA: mainArm,
-            bodyB: whipperArm,
-            pointA: { x: (p.armLength * shortArmRatio) * SCALE, y: 0 },
-            pointB: { x: -whipperLength * SCALE / 2, y: 0 },
-            length: 0,
-            stiffness: 0.3 // Flexible joint for whipping action
-        });
-        this.constraints.push(whipperJoint);
-
-        // Projectile
-        const projectileRadius = p.projectileSize * SCALE;
-        this.projectile = Matter.Bodies.circle(
-            baseX + (p.armLength * shortArmRatio + whipperLength) * SCALE,
-            baseY - 50 - p.slingLength * SCALE,
-            projectileRadius,
-            {
-                mass: p.projectileMass,
-                render: { fillStyle: '#FF4500' },
-                restitution: 0.6,
-                friction: 0.5
-            }
-        );
-        this.startX = this.projectile.position.x;
-        this.startY = this.projectile.position.y;
-        this.trebuchetBodies.push(this.projectile);
-
-        // Sling attached to whipper arm
-        const slingPoint = { x: whipperLength * SCALE / 2, y: 0 };
-        
-        this.slingConstraint1 = Matter.Constraint.create({
-            bodyA: whipperArm,
-            bodyB: this.projectile,
-            pointA: slingPoint,
-            length: p.slingLength * SCALE,
-            stiffness: 0.9,
-            render: { strokeStyle: '#8B4513', lineWidth: 2 }
-        });
-        
-        this.slingConstraint2 = Matter.Constraint.create({
-            bodyA: whipperArm,
-            bodyB: this.projectile,
-            pointA: slingPoint,
-            length: p.slingLength * SCALE,
-            stiffness: 0.9,
-            render: { strokeStyle: '#8B4513', lineWidth: 2 }
-        });
-        
-        this.constraints.push(this.slingConstraint1, this.slingConstraint2);
-
-        // Add all bodies and constraints to world
-        Matter.World.add(this.world, this.trebuchetBodies);
-        Matter.World.add(this.world, this.constraints);
-    }
-
-    buildFloatingArmTrebuchet(baseX, baseY) {
-        const p = this.parameters;
-        
-        // Floating arm design - the arm pivot can move horizontally
-        const shortArmRatio = 0.3;
-        const longArmRatio = 0.7;
-
-        // Base track (static)
-        const track = Matter.Bodies.rectangle(
-            baseX, baseY, 150, 20,
-            { 
-                isStatic: true, 
-                render: { fillStyle: '#8B4513' }
-            }
-        );
-        this.trebuchetBodies.push(track);
-
-        // Movable pivot/frame that can slide on track
-        const floatingFrame = Matter.Bodies.rectangle(
-            baseX, baseY - 30, 20, 60,
-            { 
-                mass: 50,
-                friction: 0.1,
-                render: { fillStyle: '#A0522D' }
-            }
-        );
-        this.trebuchetBodies.push(floatingFrame);
-
-        // Constraint to keep frame on track (vertical movement restricted)
-        const trackConstraint = Matter.Constraint.create({
-            bodyA: track,
-            bodyB: floatingFrame,
-            pointA: { x: 0, y: -10 },
-            pointB: { x: 0, y: 30 },
-            length: 0,
-            stiffness: 1
-        });
-        this.constraints.push(trackConstraint);
-
-        // Throwing arm
-        const armWidth = 15;
-        const arm = Matter.Bodies.rectangle(
-            baseX, baseY - 60, p.armLength * SCALE, armWidth,
-            { 
-                mass: p.armMass,
-                render: { fillStyle: '#D2691E' }
-            }
-        );
-        this.trebuchetBodies.push(arm);
-
-        // Pivot on floating frame
-        const pivotConstraint = Matter.Constraint.create({
-            bodyA: floatingFrame,
-            bodyB: arm,
-            pointA: { x: 0, y: -30 },
-            pointB: { x: -(p.armLength * longArmRatio - p.armLength / 2) * SCALE, y: 0 },
-            length: 0,
-            stiffness: 1
-        });
-        this.constraints.push(pivotConstraint);
-
-        // Counterweight
-        const cwSize = p.counterweightSize * SCALE;
-        const counterweight = Matter.Bodies.rectangle(
-            baseX - (p.armLength * longArmRatio) * SCALE, 
-            baseY - 60 - 20, 
-            cwSize, cwSize,
-            {
-                mass: p.counterweightMass,
-                render: { fillStyle: '#696969' }
-            }
-        );
-        this.trebuchetBodies.push(counterweight);
-
-        const cwHinge = Matter.Constraint.create({
-            bodyA: arm,
-            bodyB: counterweight,
-            pointA: { x: -(p.armLength * longArmRatio) * SCALE, y: 0 },
-            pointB: { x: 0, y: -cwSize / 2 },
-            length: 20,
-            stiffness: 0.8
-        });
-        this.constraints.push(cwHinge);
-
-        // Projectile
-        const projectileRadius = p.projectileSize * SCALE;
-        this.projectile = Matter.Bodies.circle(
-            baseX + (p.armLength * shortArmRatio) * SCALE,
-            baseY - 60 - p.slingLength * SCALE,
-            projectileRadius,
-            {
-                mass: p.projectileMass,
-                render: { fillStyle: '#FF4500' },
-                restitution: 0.6,
-                friction: 0.5
-            }
-        );
-        this.startX = this.projectile.position.x;
-        this.startY = this.projectile.position.y;
-        this.trebuchetBodies.push(this.projectile);
-
-        // Sling
-        const slingPoint = { x: (p.armLength * shortArmRatio) * SCALE, y: 0 };
-        
-        this.slingConstraint1 = Matter.Constraint.create({
-            bodyA: arm,
-            bodyB: this.projectile,
-            pointA: slingPoint,
-            length: p.slingLength * SCALE,
-            stiffness: 0.9,
-            render: { strokeStyle: '#8B4513', lineWidth: 2 }
-        });
-        
-        this.slingConstraint2 = Matter.Constraint.create({
-            bodyA: arm,
-            bodyB: this.projectile,
-            pointA: slingPoint,
-            length: p.slingLength * SCALE,
-            stiffness: 0.9,
-            render: { strokeStyle: '#8B4513', lineWidth: 2 }
-        });
-        
-        this.constraints.push(this.slingConstraint1, this.slingConstraint2);
-
-        // Add all bodies and constraints to world
-        Matter.World.add(this.world, this.trebuchetBodies);
-        Matter.World.add(this.world, this.constraints);
-    }
-
-    buildWalkingArmTrebuchet(baseX, baseY) {
-        const p = this.parameters;
-        
-        // Walking arm design - the base can pivot/walk
-        const shortArmRatio = 0.3;
-        const longArmRatio = 0.7;
-
-        // Walking base (can rock back and forth)
-        const baseWidth = 120;
-        const walkingBase = Matter.Bodies.trapezoid(
-            baseX, baseY, baseWidth, 40, 0.5,
-            { 
-                mass: 100,
-                friction: 1,
-                render: { fillStyle: '#654321' }
-            }
-        );
-        this.trebuchetBodies.push(walkingBase);
-
-        // Frame attached to base
-        const frame = Matter.Bodies.rectangle(
-            baseX, baseY - 50, 20, 80,
-            { 
-                mass: 30,
-                render: { fillStyle: '#8B4513' }
-            }
-        );
-        this.trebuchetBodies.push(frame);
-
-        // Attach frame to base
-        const frameConstraint = Matter.Constraint.create({
-            bodyA: walkingBase,
-            bodyB: frame,
-            pointA: { x: 0, y: -20 },
-            pointB: { x: 0, y: 40 },
-            length: 0,
-            stiffness: 0.9
-        });
-        this.constraints.push(frameConstraint);
-
-        // Throwing arm
-        const armWidth = 15;
-        const arm = Matter.Bodies.rectangle(
-            baseX, baseY - 80, p.armLength * SCALE, armWidth,
-            { 
-                mass: p.armMass,
-                render: { fillStyle: '#D2691E' }
-            }
-        );
-        this.trebuchetBodies.push(arm);
-
-        // Pivot constraint
-        const pivotConstraint = Matter.Constraint.create({
-            bodyA: frame,
-            bodyB: arm,
-            pointA: { x: 0, y: -40 },
-            pointB: { x: -(p.armLength * longArmRatio - p.armLength / 2) * SCALE, y: 0 },
-            length: 0,
-            stiffness: 1
-        });
-        this.constraints.push(pivotConstraint);
-
-        // Counterweight
-        const cwSize = p.counterweightSize * SCALE;
-        const counterweight = Matter.Bodies.rectangle(
-            baseX - (p.armLength * longArmRatio) * SCALE, 
-            baseY - 80 - 20, 
-            cwSize, cwSize,
-            {
-                mass: p.counterweightMass,
-                render: { fillStyle: '#696969' }
-            }
-        );
-        this.trebuchetBodies.push(counterweight);
-
-        const cwHinge = Matter.Constraint.create({
-            bodyA: arm,
-            bodyB: counterweight,
-            pointA: { x: -(p.armLength * longArmRatio) * SCALE, y: 0 },
-            pointB: { x: 0, y: -cwSize / 2 },
-            length: 20,
-            stiffness: 0.8
-        });
-        this.constraints.push(cwHinge);
-
-        // Projectile
-        const projectileRadius = p.projectileSize * SCALE;
-        this.projectile = Matter.Bodies.circle(
-            baseX + (p.armLength * shortArmRatio) * SCALE,
-            baseY - 80 - p.slingLength * SCALE,
-            projectileRadius,
-            {
-                mass: p.projectileMass,
-                render: { fillStyle: '#FF4500' },
-                restitution: 0.6,
-                friction: 0.5
-            }
-        );
-        this.startX = this.projectile.position.x;
-        this.startY = this.projectile.position.y;
-        this.trebuchetBodies.push(this.projectile);
-
-        // Sling
-        const slingPoint = { x: (p.armLength * shortArmRatio) * SCALE, y: 0 };
-        
-        this.slingConstraint1 = Matter.Constraint.create({
-            bodyA: arm,
-            bodyB: this.projectile,
-            pointA: slingPoint,
-            length: p.slingLength * SCALE,
-            stiffness: 0.9,
-            render: { strokeStyle: '#8B4513', lineWidth: 2 }
-        });
-        
-        this.slingConstraint2 = Matter.Constraint.create({
-            bodyA: arm,
-            bodyB: this.projectile,
-            pointA: slingPoint,
-            length: p.slingLength * SCALE,
-            stiffness: 0.9,
-            render: { strokeStyle: '#8B4513', lineWidth: 2 }
-        });
-        
-        this.constraints.push(this.slingConstraint1, this.slingConstraint2);
-
-        // Add all bodies and constraints to world
-        Matter.World.add(this.world, this.trebuchetBodies);
-        Matter.World.add(this.world, this.constraints);
+        // Store results
+        this.trebuchetBodies = result.bodies;
+        this.joints = result.joints;
+        this.projectile = result.projectile;
+        this.slingJoint = result.slingJoint;
+        const projPos = this.projectile.getPosition();
+        this.startX = projPos.x;
+        this.startY = projPos.y;
     }
 
     fire() {
         if (this.fired || !this.projectile) return;
         
+        // Unpause if paused
+        if (this.paused) {
+            this.paused = false;
+        }
+        
         this.fired = true;
         this.stats = { distance: 0, maxHeight: 0, time: 0 };
         
-        // Release sling at appropriate angle
-        const releaseAngleRad = (this.parameters.releaseAngle * Math.PI) / 180;
-        
+        // Release sling immediately or at appropriate angle
         setTimeout(() => {
-            if (this.slingConstraint1 && this.slingConstraint2) {
-                Matter.World.remove(this.world, this.slingConstraint1);
-                Matter.World.remove(this.world, this.slingConstraint2);
+            if (this.slingJoint) {
+                this.world.destroyJoint(this.slingJoint);
+                this.slingJoint = null;
             }
-        }, 100); // Small delay for better release timing
+        }, 100);
     }
 
     reset() {
@@ -650,11 +257,6 @@ class TrebuchetSimulator {
 
     pause() {
         this.paused = !this.paused;
-        if (this.paused) {
-            Matter.Runner.stop(this.runner);
-        } else {
-            Matter.Runner.run(this.runner, this.engine);
-        }
         return this.paused;
     }
 
@@ -669,5 +271,11 @@ class TrebuchetSimulator {
             maxHeight: Math.max(0, this.stats.maxHeight).toFixed(2),
             time: this.stats.time.toFixed(2)
         };
+    }
+    
+    setPlaySpeed(speed) {
+        // Planck.js doesn't have built-in time scaling
+        // Would need to adjust step size in animate()
+        this.timeScale = parseFloat(speed);
     }
 }

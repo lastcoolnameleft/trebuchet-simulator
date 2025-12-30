@@ -7,14 +7,27 @@ document.addEventListener('DOMContentLoaded', () => {
     const canvas = document.getElementById('simulationCanvas');
     simulator = new TrebuchetSimulator(canvas);
     
+    // Populate parameter inputs with default values
+    const defaultParams = simulator.getDefaultParameters();
+    Object.keys(defaultParams).forEach(param => {
+        const input = document.getElementById(param);
+        if (input) {
+            input.value = defaultParams[param];
+        }
+    });
+    
     // Build initial trebuchet
-    simulator.buildTrebuchet('hinged', simulator.getDefaultParameters());
+    simulator.buildTrebuchet('sandbox', simulator.getDefaultParameters());
     
     // Setup UI event listeners
     setupTrebuchetTypeButtons();
     setupParameterControls();
     setupSimulationControls();
+    setupKeyboardShortcuts();
     setupStatsUpdater();
+    
+    // Set initial pause button text since we start paused
+    document.getElementById('pauseBtn').textContent = 'Play';
 });
 
 // Handle window resize
@@ -22,32 +35,23 @@ window.addEventListener('resize', () => {
     if (simulator) {
         const canvas = document.getElementById('simulationCanvas');
         const rect = canvas.getBoundingClientRect();
-        simulator.render.canvas.width = rect.width;
-        simulator.render.canvas.height = rect.height;
-        simulator.render.options.width = rect.width;
-        simulator.render.options.height = rect.height;
+        canvas.width = rect.width;
+        canvas.height = rect.height;
         simulator.reset();
     }
 });
 
-// Setup trebuchet type selection buttons
+// Setup trebuchet type selection dropdown
 function setupTrebuchetTypeButtons() {
-    const typeButtons = document.querySelectorAll('.type-btn');
+    const typeSelect = document.getElementById('trebuchetType');
     
-    typeButtons.forEach(button => {
-        button.addEventListener('click', () => {
-            // Update active state
-            typeButtons.forEach(btn => btn.classList.remove('active'));
-            button.classList.add('active');
-            
-            // Build new trebuchet type
-            const type = button.getAttribute('data-type');
+    if (typeSelect) {
+        typeSelect.addEventListener('change', (e) => {
+            const type = e.target.value;
             simulator.buildTrebuchet(type, simulator.parameters);
-            
-            // Update button states
             updateButtonStates();
         });
-    });
+    }
 }
 
 // Setup parameter controls (sliders)
@@ -60,75 +64,87 @@ function setupParameterControls() {
         'projectileSize',
         'slingLength',
         'armMass',
-        'releaseAngle'
+        'releaseAngle',
+        'armHeight'
     ];
     
+    // Setup play speed control separately
+    const playSpeedSlider = document.getElementById('playSpeed');
+    const playSpeedValue = document.getElementById('playSpeedValue');
+    
+    if (playSpeedSlider && playSpeedValue) {
+        playSpeedSlider.addEventListener('input', (e) => {
+            const value = e.target.value;
+            playSpeedValue.textContent = value + 'x';
+            simulator.setPlaySpeed(value);
+        });
+        playSpeedValue.textContent = playSpeedSlider.value + 'x';
+    }
+    
     parameters.forEach(param => {
-        const slider = document.getElementById(param);
-        const valueDisplay = document.getElementById(param + 'Value');
+        const input = document.getElementById(param);
         
-        if (slider && valueDisplay) {
-            // Update display when slider changes
-            slider.addEventListener('input', (e) => {
-                const value = e.target.value;
-                valueDisplay.textContent = value;
-            });
-            
-            // Update trebuchet when slider is released
-            slider.addEventListener('change', (e) => {
+        if (input) {
+            // Update trebuchet when value changes
+            input.addEventListener('change', (e) => {
                 const value = e.target.value;
                 simulator.updateParameter(param, value);
                 updateButtonStates();
             });
-            
-            // Initialize display
-            valueDisplay.textContent = slider.value;
         }
     });
 }
 
 // Setup simulation control buttons
 function setupSimulationControls() {
-    const fireBtn = document.getElementById('fireBtn');
     const resetBtn = document.getElementById('resetBtn');
     const pauseBtn = document.getElementById('pauseBtn');
     
-    fireBtn.addEventListener('click', () => {
-        simulator.fire();
-        updateButtonStates();
-    });
-    
     resetBtn.addEventListener('click', () => {
         simulator.reset();
+        simulator.pause();
         updateButtonStates();
-        pauseBtn.textContent = 'Pause';
+        pauseBtn.textContent = 'Play';
         updateStats({ distance: '0', maxHeight: '0', time: '0' });
     });
     
     pauseBtn.addEventListener('click', () => {
         const isPaused = simulator.pause();
-        pauseBtn.textContent = isPaused ? 'Resume' : 'Pause';
+        pauseBtn.textContent = isPaused ? 'Play' : 'Pause';
+    });
+}
+
+// Setup keyboard shortcuts
+function setupKeyboardShortcuts() {
+    document.addEventListener('keydown', (e) => {
+        // Space bar to toggle pause
+        if (e.code === 'Space') {
+            e.preventDefault();
+            const pauseBtn = document.getElementById('pauseBtn');
+            const isPaused = simulator.pause();
+            pauseBtn.textContent = isPaused ? 'Play' : 'Pause';
+        }
+        // Enter to reset
+        else if (e.code === 'Enter') {
+            e.preventDefault();
+            simulator.reset();
+            simulator.pause();
+            updateButtonStates();
+            document.getElementById('pauseBtn').textContent = 'Play';
+            updateStats({ distance: '0', maxHeight: '0', time: '0' });
+        }
     });
 }
 
 // Update button states based on simulation state
 function updateButtonStates() {
-    const fireBtn = document.getElementById('fireBtn');
-    const resetBtn = document.getElementById('resetBtn');
-    
-    if (simulator.fired) {
-        fireBtn.disabled = true;
-        resetBtn.disabled = false;
-    } else {
-        fireBtn.disabled = false;
-        resetBtn.disabled = false;
-    }
+    // No special button state management needed anymore
 }
 
 // Setup stats updater
 function setupStatsUpdater() {
     setInterval(() => {
-        if (simulator && simulator.fired) {
+        if (simulator && !simulator.paused) {
             const stats = simulator.getStats();
             updateStats(stats);
         }

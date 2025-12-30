@@ -18,9 +18,8 @@
             <div class="canvas-container">
                 <canvas id="simulationCanvas"></canvas>
                 <div class="controls">
-                    <button id="fireBtn" class="btn btn-primary">Fire!</button>
+                    <button id="pauseBtn" class="btn btn-primary">Play</button>
                     <button id="resetBtn" class="btn btn-secondary">Reset</button>
-                    <button id="pauseBtn" class="btn btn-secondary">Pause</button>
                 </div>
             </div>
 
@@ -28,11 +27,14 @@
             <div class="sidebar">
                 <section class="section">
                     <h2>Trebuchet Type</h2>
-                    <div class="trebuchet-types">
-                        <button class="type-btn active" data-type="hinged">Hinged Counterweight</button>
-                        <button class="type-btn" data-type="whipper">Whipper</button>
-                        <button class="type-btn" data-type="floating">Floating Arm</button>
-                        <button class="type-btn" data-type="walking">Walking Arm</button>
+                    <div class="param-group">
+                        <select id="trebuchetType" class="trebuchet-type-select">
+                            <option value="hinged">Hinged Counterweight</option>
+                            <option value="whipper">Whipper</option>
+                            <option value="floating">Floating Arm</option>
+                            <option value="walking">Walking Arm</option>
+                            <option value="sandbox" selected>Sandbox</option>
+                        </select>
                     </div>
                 </section>
 
@@ -40,51 +42,66 @@
                     <h2>Customize Parameters</h2>
                     <div class="parameters">
                         <div class="param-group">
-                            <label for="armLength">Arm Length (m)</label>
-                            <input type="range" id="armLength" min="2" max="10" step="0.5" value="6">
-                            <span class="value" id="armLengthValue">6</span>
+                            <label for="armLength">Arm Length</label>
+                            <input type="number" id="armLength" step="1">
+                            <span class="unit">m</span>
                         </div>
 
                         <div class="param-group">
-                            <label for="counterweightMass">Counterweight Mass (kg)</label>
-                            <input type="range" id="counterweightMass" min="50" max="500" step="10" value="200">
-                            <span class="value" id="counterweightMassValue">200</span>
+                            <label for="armHeight">Arm Height</label>
+                            <input type="number" id="armHeight" step="0.5">
+                            <span class="unit">m</span>
                         </div>
 
                         <div class="param-group">
-                            <label for="counterweightSize">Counterweight Size (m)</label>
-                            <input type="range" id="counterweightSize" min="0.5" max="2" step="0.1" value="1">
-                            <span class="value" id="counterweightSizeValue">1</span>
+                            <label for="armMass">Arm Mass</label>
+                            <input type="number" id="armMass" step="5">
+                            <span class="unit">kg</span>
                         </div>
 
                         <div class="param-group">
-                            <label for="projectileMass">Projectile Mass (kg)</label>
-                            <input type="range" id="projectileMass" min="1" max="50" step="1" value="10">
-                            <span class="value" id="projectileMassValue">10</span>
+                            <label for="counterweightMass">Counterweight Mass</label>
+                            <input type="number" id="counterweightMass" step="10">                            <span class="unit">kg</span>                        </div>
+
+                        <div class="param-group">
+                            <label for="counterweightSize">Counterweight Size</label>
+                            <input type="number" id="counterweightSize" step="0.1">
+                            <span class="unit">m</span>
                         </div>
 
                         <div class="param-group">
-                            <label for="projectileSize">Projectile Size (m)</label>
-                            <input type="range" id="projectileSize" min="0.1" max="0.5" step="0.05" value="0.2">
-                            <span class="value" id="projectileSizeValue">0.2</span>
+                            <label for="projectileMass">Projectile Mass</label>
+                            <input type="number" id="projectileMass" step="1">
+                            <span class="unit">kg</span>
                         </div>
 
                         <div class="param-group">
-                            <label for="slingLength">Sling Length (m)</label>
-                            <input type="range" id="slingLength" min="2" max="8" step="0.5" value="4">
-                            <span class="value" id="slingLengthValue">4</span>
+                            <label for="projectileSize">Projectile Size</label>
+                            <input type="number" id="projectileSize" step="0.05">
+                            <span class="unit">m</span>
                         </div>
 
                         <div class="param-group">
-                            <label for="armMass">Arm Mass (kg)</label>
-                            <input type="range" id="armMass" min="10" max="100" step="5" value="30">
-                            <span class="value" id="armMassValue">30</span>
+                            <label for="slingLength">Sling Length</label>
+                            <input type="number" id="slingLength" step="0.5">
+                            <span class="unit">m</span>
                         </div>
 
                         <div class="param-group">
-                            <label for="releaseAngle">Release Angle (degrees)</label>
-                            <input type="range" id="releaseAngle" min="30" max="60" step="5" value="45">
-                            <span class="value" id="releaseAngleValue">45</span>
+                            <label for="releaseAngle">Release Angle</label>
+                            <input type="number" id="releaseAngle" step="5">
+                            <span class="unit">°</span>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="section">
+                    <h2>Simulation Speed</h2>
+                    <div class="parameters">
+                        <div class="param-group">
+                            <label for="playSpeed">Play Speed</label>
+                            <input type="range" id="playSpeed" min="0.1" max="2" step="0.25" value="0.10">
+                            <span class="value" id="playSpeedValue">1x</span>
                         </div>
                     </div>
                 </section>
@@ -108,7 +125,13 @@
         </div>
     </div>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+    <script src="planck.min.js"></script>
+    <script src="trebuchets/base-trebuchet.js"></script>
+    <script src="trebuchets/hinged-trebuchet.js"></script>
+    <script src="trebuchets/whipper-trebuchet.js"></script>
+    <script src="trebuchets/floating-arm-trebuchet.js"></script>
+    <script src="trebuchets/walking-arm-trebuchet.js"></script>
+    <script src="trebuchets/sandbox-trebuchet.js"></script>
     <script src="trebuchet.js"></script>
     <script src="app.js"></script>
 </body>
