@@ -141,6 +141,7 @@ class SandboxTrebuchetBuilder extends BaseTrebuchetBuilder {
             shape: planck.Circle(projRadius),
             density: 1.0,
             friction: 0.5,
+            restitution: 0.0, // No bounce
             filterCategoryBits: 0x0008,
             filterMaskBits: 0x0001 | 0x0004, // Collide with ground and counterweight, but not frame (0x0002)
             userData: { color: '#FF4500' }

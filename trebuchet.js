@@ -16,6 +16,9 @@ class TrebuchetSimulator {
         this.projectileTrajectory = [];
         this.animationId = null;
         this.projectileHitGround = false; // Track if projectile hit ground
+        this.cameraScale = SCALE; // Dynamic zoom level
+        this.cameraOffsetX = 0; // Dynamic camera offset
+        this.trebuchetX = 0; // Track trebuchet position for camera
         // Initialize trebuchet builders
         this.builders = {
             hinged: new HingedTrebuchetBuilder(this),
@@ -39,12 +42,12 @@ class TrebuchetSimulator {
             const bodyA = fixtureA.getBody();
             const bodyB = fixtureB.getBody();
             
-            // Check if projectile hit ground
+            // Check if projectile hit ground (mark for stats tracking)
             if ((bodyA === this.projectile && bodyB === this.ground) ||
                 (bodyB === this.projectile && bodyA === this.ground)) {
                 if (!this.projectileHitGround) {
                     this.projectileHitGround = true;
-                    // Stop the projectile
+                    // Stop the projectile immediately
                     if (this.projectile) {
                         this.projectile.setLinearVelocity(planck.Vec2(0, 0));
                         this.projectile.setAngularVelocity(0);
@@ -59,10 +62,10 @@ class TrebuchetSimulator {
         this.canvas.width = rect.width;
         this.canvas.height = rect.height;
 
-        // Create ground (thin ground layer extended to the left)
+        // Create ground (thin ground layer extending infinitely)
         const groundHalfHeight = 0.5; // Thinner ground (was 2.5)
-        const groundHalfWidth = rect.width / SCALE; // Double width to extend left
-        const groundCenterX = rect.width / 2 / SCALE; // Keep center at canvas middle
+        const groundHalfWidth = 5100; // Wide enough to extend 100m left of trebuchet and far to the right
+        const groundCenterX = 5000; // Center positioned to cover from -100m to 10000m+
         const groundBody = this.world.createBody({
             position: planck.Vec2(groundCenterX, (rect.height - groundHalfHeight) / SCALE)
         });
@@ -129,14 +132,48 @@ class TrebuchetSimulator {
         this.ctx.fillStyle = '#0f0f13';
         this.ctx.fillRect(0, 0, rect.width, rect.height);
         
-        // Camera offset - shift view to the left
-        const cameraOffsetX = 200; // Negative value moves camera left (scene appears to move right)
+        // Dynamic camera system
+        let cameraOffsetX = 200; // Default offset
+        let cameraScale = SCALE; // Default scale
+        
+        if (this.projectile && this.trebuchetX) {
+            const projPos = this.projectile.getPosition();
+            const projX = projPos.x;
+            
+            // Only adjust camera if projectile has moved past trebuchet
+            if (projX > this.trebuchetX + 5) { // 5m threshold to start tracking
+                // Calculate the span we need to show (trebuchet to projectile)
+                const spanMeters = projX - this.trebuchetX;
+                
+                // We want trebuchet at 10% and projectile at 90% of screen width
+                // So the span should occupy 80% of the screen
+                const availableWidth = rect.width * 0.8;
+                
+                // Calculate required scale to fit this span
+                cameraScale = availableWidth / spanMeters;
+                
+                // Clamp scale to reasonable values
+                cameraScale = Math.max(5, Math.min(cameraScale, SCALE));
+                
+                // Calculate camera offset to position trebuchet at 10% of screen
+                // We want: trebuchetX * cameraScale + cameraOffsetX = rect.width * 0.1
+                cameraOffsetX = rect.width * 0.1 - this.trebuchetX * cameraScale;
+            }
+        }
+        
+        this.cameraScale = cameraScale;
+        this.cameraOffsetX = cameraOffsetX;
+        
+        // Calculate Y offset to keep ground at bottom of screen
+        // Ground's world Y position should always render at rect.height on screen
+        const groundWorldY = this.ground.getPosition().y;
+        const cameraOffsetY = rect.height - (groundWorldY * cameraScale);
         
         // Draw all bodies
         for (let body = this.world.getBodyList(); body; body = body.getNext()) {
             this.ctx.save();
             const pos = body.getPosition();
-            this.ctx.translate(pos.x * SCALE + cameraOffsetX, pos.y * SCALE);
+            this.ctx.translate(pos.x * cameraScale + cameraOffsetX, pos.y * cameraScale + cameraOffsetY);
             this.ctx.rotate(body.getAngle());
             
             for (let fixture = body.getFixtureList(); fixture; fixture = fixture.getNext()) {
@@ -145,15 +182,15 @@ class TrebuchetSimulator {
                 if (shape.getType() === 'circle') {
                     this.ctx.fillStyle = fixture.getUserData()?.color || '#8B4513';
                     this.ctx.beginPath();
-                    this.ctx.arc(0, 0, shape.getRadius() * SCALE, 0, Math.PI * 2);
+                    this.ctx.arc(0, 0, shape.getRadius() * cameraScale, 0, Math.PI * 2);
                     this.ctx.fill();
                 } else if (shape.getType() === 'polygon') {
                     const vertices = shape.m_vertices;
                     this.ctx.fillStyle = fixture.getUserData()?.color || '#654321';
                     this.ctx.beginPath();
-                    this.ctx.moveTo(vertices[0].x * SCALE, vertices[0].y * SCALE);
+                    this.ctx.moveTo(vertices[0].x * cameraScale, vertices[0].y * cameraScale);
                     for (let i = 1; i < vertices.length; i++) {
-                        this.ctx.lineTo(vertices[i].x * SCALE, vertices[i].y * SCALE);
+                        this.ctx.lineTo(vertices[i].x * cameraScale, vertices[i].y * cameraScale);
                     }
                     this.ctx.closePath();
                     this.ctx.fill();
@@ -170,8 +207,8 @@ class TrebuchetSimulator {
             const anchorB = joint.getAnchorB();
             
             this.ctx.beginPath();
-            this.ctx.moveTo(anchorA.x * SCALE + cameraOffsetX, anchorA.y * SCALE);
-            this.ctx.lineTo(anchorB.x * SCALE + cameraOffsetX, anchorB.y * SCALE);
+            this.ctx.moveTo(anchorA.x * cameraScale + cameraOffsetX, anchorA.y * cameraScale + cameraOffsetY);
+            this.ctx.lineTo(anchorB.x * cameraScale + cameraOffsetX, anchorB.y * cameraScale + cameraOffsetY);
             this.ctx.stroke();
         }
     }
@@ -211,6 +248,9 @@ class TrebuchetSimulator {
         const rect = this.canvas.getBoundingClientRect();
         const baseX = 200 / SCALE;
         const baseY = this.groundTop; // Use stored ground top position
+        
+        // Store trebuchet position for camera tracking
+        this.trebuchetX = baseX;
 
         // Use the appropriate builder
         const builder = this.builders[type];
