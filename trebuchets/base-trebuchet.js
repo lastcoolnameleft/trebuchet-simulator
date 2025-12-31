@@ -9,18 +9,30 @@ class BaseTrebuchetBuilder {
 
     // Common method to create projectile
     createProjectile(x, y, params) {
-        const projectileRadius = params.projectileSize;
+        const projectileRadius = params.projectileSize / 2; // projectileSize is diameter
         const projectile = this.simulator.world.createBody({
             position: planck.Vec2(x, y),
-            type: 'dynamic'
+            type: 'dynamic',
+            bullet: true // Enable CCD for fast-moving projectile
         });
         projectile.createFixture({
             shape: planck.Circle(projectileRadius),
             density: params.projectileMass / (Math.PI * projectileRadius * projectileRadius),
             restitution: 0.6,
             friction: 0.5,
+            filterCategoryBits: 0x0008, // Projectile category
+            filterMaskBits: 0x0001, // Only collide with ground
             userData: { color: '#FF4500' }
         });
+        
+        // Debug projectile properties
+        console.log('🎯 PROJECTILE CREATED:',
+            '\n  Position:', projectile.getPosition(),
+            '\n  Type:', projectile.getType(),
+            '\n  Bullet:', projectile.isBullet(),
+            '\n  Fixture category:', projectile.getFixtureList().getFilterCategoryBits().toString(16),
+            '\n  Fixture mask:', projectile.getFixtureList().getFilterMaskBits().toString(16));
+        
         return projectile;
     }
 

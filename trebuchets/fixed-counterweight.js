@@ -2,7 +2,7 @@
 // Based on planck.html working implementation
 // Customizable starting point for experimentation
 
-class HingedCounterweightTrebuchetBuilder extends BaseTrebuchetBuilder {
+class FixedCounterweightTrebuchetBuilder extends BaseTrebuchetBuilder {
   static getParameterConfig() {
     return [
       { id: 'projectileArmLength', label: 'Arm Length (Projectile)', unit: 'm', step: 1, min: 1, max: 50, default: 14 },
@@ -75,28 +75,17 @@ class HingedCounterweightTrebuchetBuilder extends BaseTrebuchetBuilder {
     );
     joints.push(pivotJoint);
 
-    // Counterweight - calculate position based on arm angle and attachment length
+    // Counterweight - directly attached to arm (fixed, not hanging)
     const cwRadius = params.counterweightSize || 2.5;
-    const cwAttachLength = 5;
     const armAngle = -Math.PI / 4; // Same angle as arm
 
     // Calculate the world position of the counterweight attachment point on the arm
     const cwAttachX = baseX + rightArmLength * Math.cos(armAngle);
     const cwAttachY = pivotY + rightArmLength * Math.sin(armAngle);
 
-    // Position counterweight exactly cwAttachLength away, hanging below attachment point
+    // Position counterweight directly at attachment point (fixed to arm)
     const cwX = cwAttachX;
-    const cwY = cwAttachY + cwAttachLength;
-
-    // Verify distance
-    const cwActualDistance = Math.sqrt(
-      Math.pow(cwX - cwAttachX, 2) + Math.pow(cwY - cwAttachY, 2)
-    );
-    console.log(
-      `Counterweight attach length: ${cwAttachLength}, Actual distance: ${cwActualDistance.toFixed(
-        3
-      )}`
-    );
+    const cwY = cwAttachY;
 
     const counterweight = this.simulator.world.createBody({
       position: planck.Vec2(cwX, cwY),
@@ -122,19 +111,19 @@ class HingedCounterweightTrebuchetBuilder extends BaseTrebuchetBuilder {
     counterweight.setAngularVelocity(0);
     bodies.push(counterweight);
 
-    // Counterweight hinge (distance joint from planck.html)
-    const cwHinge = this.simulator.world.createJoint(
-      planck.DistanceJoint({
+    // Fixed counterweight - weld joint to make it rigidly attached to arm
+    const cwWeld = this.simulator.world.createJoint(
+      planck.WeldJoint({
         bodyA: arm,
         bodyB: counterweight,
         localAnchorA: planck.Vec2(rightArmLength, 0),
         localAnchorB: planck.Vec2(0, 0),
-        length: cwAttachLength,
-        dampingRatio: 0.4,
-        frequencyHz: 8.0,
+        referenceAngle: 0,
+        frequencyHz: 0.0,  // Rigid connection
+        dampingRatio: 0.0,
       })
     );
-    joints.push(cwHinge);
+    joints.push(cwWeld);
 
     // Projectile - calculate position based on arm angle and sling length
     const projRadius = 0.75;

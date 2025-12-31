@@ -48,26 +48,83 @@ function setupTrebuchetTypeButtons() {
     if (typeSelect) {
         typeSelect.addEventListener('change', (e) => {
             const type = e.target.value;
+            buildParameterInputs(type);
             simulator.buildTrebuchet(type, simulator.parameters);
+            updateParameterInputs();
+            updateButtonStates();
+            updateStats(simulator.getStats()); // Update stats display with estimated distance
+        });
+        
+        // Initialize with current type
+        buildParameterInputs(typeSelect.value);
+    }
+}
+
+// Update parameter input fields to reflect current values
+function updateParameterInputs() {
+    const params = simulator.parameters;
+    Object.keys(params).forEach(param => {
+        const input = document.getElementById(param);
+        if (input) {
+            input.value = params[param];
+        }
+    });
+}
+
+// Build parameter inputs dynamically based on builder config
+function buildParameterInputs(type) {
+    const container = document.querySelector('.section .parameters');
+    if (!container) return;
+    
+    // Get the builder class and its parameter config
+    const builderClass = simulator.getBuilderClass(type);
+    if (!builderClass || !builderClass.getParameterConfig) {
+        console.warn(`No parameter config for type: ${type}`);
+        return;
+    }
+    
+    const paramConfig = builderClass.getParameterConfig();
+    
+    // Clear existing parameter inputs
+    container.innerHTML = '';
+    
+    // Build new parameter inputs
+    paramConfig.forEach(param => {
+        const paramGroup = document.createElement('div');
+        paramGroup.className = 'param-group';
+        
+        const label = document.createElement('label');
+        label.setAttribute('for', param.id);
+        label.textContent = param.label;
+        
+        const input = document.createElement('input');
+        input.type = 'number';
+        input.id = param.id;
+        input.step = param.step;
+        input.min = param.min || 0;
+        input.max = param.max || 10000;
+        input.value = simulator.parameters[param.id] !== undefined ? simulator.parameters[param.id] : param.default;
+        
+        const unit = document.createElement('span');
+        unit.className = 'unit';
+        unit.textContent = param.unit;
+        
+        paramGroup.appendChild(label);
+        paramGroup.appendChild(input);
+        paramGroup.appendChild(unit);
+        container.appendChild(paramGroup);
+        
+        // Add event listener for parameter changes
+        input.addEventListener('change', (e) => {
+            const value = e.target.value;
+            simulator.updateParameter(param.id, value);
             updateButtonStates();
         });
-    }
+    });
 }
 
 // Setup parameter controls (sliders)
 function setupParameterControls() {
-    const parameters = [
-        'armLength',
-        'counterweightMass',
-        'counterweightSize',
-        'projectileMass',
-        'projectileSize',
-        'slingLength',
-        'armMass',
-        'releaseAngle',
-        'armHeight'
-    ];
-    
     // Setup play speed control separately
     const playSpeedSlider = document.getElementById('playSpeed');
     const playSpeedValue = document.getElementById('playSpeedValue');
@@ -80,19 +137,7 @@ function setupParameterControls() {
         });
         playSpeedValue.textContent = playSpeedSlider.value + 'x';
     }
-    
-    parameters.forEach(param => {
-        const input = document.getElementById(param);
-        
-        if (input) {
-            // Update trebuchet when value changes
-            input.addEventListener('change', (e) => {
-                const value = e.target.value;
-                simulator.updateParameter(param, value);
-                updateButtonStates();
-            });
-        }
-    });
+    // Note: Individual parameter event listeners are now added dynamically in buildParameterInputs()
 }
 
 // Setup simulation control buttons
@@ -105,12 +150,25 @@ function setupSimulationControls() {
         simulator.pause();
         updateButtonStates();
         pauseBtn.textContent = 'Play';
-        updateStats({ distance: '0', maxHeight: '0', time: '0' });
+        updateStats({ distance: '0', height: '0', velocity: '0', maxDistance: '0', maxHeight: '0', maxVelocity: '0', time: '0', estimatedDistance: '0' });
     });
     
     pauseBtn.addEventListener('click', () => {
         const isPaused = simulator.pause();
         pauseBtn.textContent = isPaused ? 'Play' : 'Pause';
+    });
+    
+    const stepBtn = document.getElementById('stepBtn');
+    const stepMultiBtn = document.getElementById('stepMultiBtn');
+    const stepCountInput = document.getElementById('stepCount');
+    
+    stepBtn.addEventListener('click', () => {
+        simulator.step(1);
+    });
+    
+    stepMultiBtn.addEventListener('click', () => {
+        const numSteps = parseInt(stepCountInput.value) || 1;
+        simulator.step(numSteps);
     });
 }
 
@@ -131,7 +189,17 @@ function setupKeyboardShortcuts() {
             simulator.pause();
             updateButtonStates();
             document.getElementById('pauseBtn').textContent = 'Play';
-            updateStats({ distance: '0', maxHeight: '0', time: '0' });
+            updateStats({ distance: '0', height: '0', velocity: '0', maxDistance: '0', maxHeight: '0', maxVelocity: '0', time: '0', estimatedDistance: '0' });
+        }
+        // Arrow right to step forward (single frame)
+        else if (e.code === 'ArrowRight') {
+            e.preventDefault();
+            simulator.step(1);
+        }
+        // Shift + Arrow right to step forward (10 frames)
+        else if (e.code === 'ArrowRight' && e.shiftKey) {
+            e.preventDefault();
+            simulator.step(10);
         }
     });
 }
@@ -154,11 +222,20 @@ function setupStatsUpdater() {
 // Update stats display
 function updateStats(stats) {
     document.getElementById('distanceValue').textContent = stats.distance + ' m';
+    document.getElementById('currentHeightValue').textContent = stats.height + ' m';
+    document.getElementById('velocityValue').textContent = stats.velocity + ' m/s';
+    document.getElementById('maxDistanceValue').textContent = stats.maxDistance + ' m';
     document.getElementById('heightValue').textContent = stats.maxHeight + ' m';
+    document.getElementById('maxVelocityValue').textContent = stats.maxVelocity + ' m/s';
     document.getElementById('timeValue').textContent = stats.time + ' s';
+    if (stats.estimatedDistance !== undefined) {
+        document.getElementById('estimatedDistanceValue').textContent = stats.estimatedDistance + ' m';
+    }
 }
 
 // Utility function to format numbers
 function formatNumber(num, decimals = 2) {
     return parseFloat(num).toFixed(decimals);
 }
+
+
