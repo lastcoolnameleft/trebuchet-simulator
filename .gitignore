@@ -1,0 +1,7 @@
+node_modules/
+.playwright-mcp/
+playground/
+old/
+__pycache__/
+*.png
+*.pyc

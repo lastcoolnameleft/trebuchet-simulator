@@ -1,0 +1,16 @@
+{
+  "name": "trebuchet-simulator",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Accurate 2D trebuchet physics simulator using Lagrangian mechanics",
+  "scripts": {
+    "build": "esbuild src/app.ts --bundle --format=iife --platform=browser --target=es2020 --outfile=dist/bundle.js",
+    "watch": "esbuild src/app.ts --bundle --format=iife --platform=browser --target=es2020 --outfile=dist/bundle.js --watch",
+    "start": "npm run build && node serve.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0",
+    "typescript": "^5.8.0"
+  }
+}
