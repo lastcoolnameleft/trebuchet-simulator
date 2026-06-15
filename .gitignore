@@ -1,7 +1,9 @@
 node_modules/
+dist/
 .playwright-mcp/
 playground/
 old/
+bakeoff/
 __pycache__/
 *.png
 *.pyc
