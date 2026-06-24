@@ -1,0 +1,414 @@
+# ============================================================================
+# Trebuchet Design Specification: Hinged Counterweight (HCW)
+# ============================================================================
+# This file fully describes the mechanical system so that geometry, physics
+# (equations of motion), rendering, and UI parameters can be generated.
+# ============================================================================
+
+name: Hinged Counterweight Trebuchet
+abbreviation: HCW
+description: >
+  A trebuchet where the counterweight hangs from the short arm via a hinge,
+  allowing it to swing freely. A sling attached to the long arm tip carries
+  the projectile. This is the most common high-performance trebuchet design.
+
+# ----------------------------------------------------------------------------
+# Coordinate Convention
+# ----------------------------------------------------------------------------
+# All angles measured from the DOWNWARD vertical (positive = counterclockwise).
+# The pivot is at the origin. Y-positive is UP in the physics frame.
+# The renderer inverts Y so that y-positive is DOWN on screen.
+
+coordinate_system:
+  origin: pivot
+  angle_reference: downward_vertical
+  angle_positive: counterclockwise
+  y_axis: up_in_physics  # renderer flips to y-down
+
+# ----------------------------------------------------------------------------
+# Rigid Bodies
+# ----------------------------------------------------------------------------
+bodies:
+  frame:
+    description: Fixed support structure holding the pivot at height h above ground
+    type: fixed
+    parameters:
+      - name: h
+        label: Pivot Height
+        unit: m
+        description: Height of the pivot point above the ground
+        default: 1.524
+
+  arm:
+    description: Rigid beam that rotates around the pivot
+    type: rigid
+    parameters:
+      - name: LAl
+        label: Arm Length (Long/Projectile side)
+        unit: m
+        description: Distance from pivot to sling attachment point
+        default: 2.0726
+      - name: LAs
+        label: Arm Length (Short/Counterweight side)
+        unit: m
+        description: Distance from pivot to counterweight attachment point
+        default: 0.5334
+      - name: LAcg
+        label: Arm CG Distance
+        unit: m
+        description: Distance from pivot to the arm's center of gravity (on the long side)
+        default: 0.7681
+      - name: mA
+        label: Arm Mass
+        unit: kg
+        default: 4.8307
+      - name: IA3
+        label: Arm Moment of Inertia
+        unit: kg·m²
+        description: Moment of inertia of the arm about the pivot
+        default: 2.7287
+        derived_from: Can be approximated as (1/3) * mA * (LAl + LAs)²
+
+  counterweight:
+    description: Heavy mass that hangs from the short arm end and provides energy
+    type: rigid
+    parameters:
+      - name: mW
+        label: Counterweight Mass
+        unit: kg
+        default: 44.4933
+      - name: LW
+        label: CW Hanging Length
+        unit: m
+        description: Length of the rod/chain from arm attachment point to CW center of mass
+        default: 0.6096
+      - name: IW3
+        label: CW Moment of Inertia
+        unit: kg·m²
+        description: Moment of inertia of the counterweight about its own pivot
+        default: 0.04244
+        derived_from: Can be approximated as mW * r² for a compact mass
+
+  sling:
+    description: Flexible rope/pouch carrying the projectile, attached to long arm tip
+    type: massless_link
+    parameters:
+      - name: LS
+        label: Sling Length
+        unit: m
+        default: 2.0828
+
+  projectile:
+    description: The object being launched
+    type: point_mass
+    parameters:
+      - name: mP
+        label: Projectile Mass
+        unit: kg
+        default: 0.1497
+
+# ----------------------------------------------------------------------------
+# Joints / Connections
+# ----------------------------------------------------------------------------
+joints:
+  pivot:
+    connects: [arm, frame]
+    type: revolute  # free rotation
+    location: origin (0, 0) at height h above ground
+
+  counterweight_hinge:
+    connects: [counterweight, arm]
+    type: revolute  # CW swings freely relative to arm
+    location: short arm tip (distance LAs from pivot)
+
+  sling_attachment:
+    connects: [sling, arm]
+    type: revolute  # sling swings freely relative to arm
+    location: long arm tip (distance LAl from pivot)
+
+  sling_projectile:
+    connects: [sling, projectile]
+    type: release  # holds projectile until release condition is met
+    location: sling tip (distance LS from sling attachment)
+    release_condition: see stages.release below
+
+# ----------------------------------------------------------------------------
+# Degrees of Freedom
+# ----------------------------------------------------------------------------
+degrees_of_freedom:
+  - name: Aq
+    label: Arm Angle
+    body: arm
+    description: >
+      Angle of the arm from downward vertical. When Aq = 0, the long arm
+      points straight down. Increases counterclockwise.
+    initial_value: >
+      Computed so the long arm tip is at ground level:
+      Aq0 = π - acos(h / LAl)
+      If h > LAl, use Aq0 = 14π/15 (near-vertical fallback).
+
+  - name: Wq
+    label: Counterweight Angle
+    body: counterweight
+    description: >
+      Angle of the counterweight rod relative to the arm direction.
+      When Wq = -Aq, the counterweight hangs straight down (vertical).
+    initial_value: "Wq0 = -Aq0  (hanging straight down)"
+
+  - name: Sq
+    label: Sling Angle
+    body: sling
+    description: >
+      Angle of the sling relative to the arm direction.
+    initial_value: >
+      Determined by the ground constraint:
+      LAl * cos(Aq) + LS * cos(Aq + Sq) = -h
+      Solve for Sq choosing the solution where Aq + Sq is in (π, 2π).
+
+# ----------------------------------------------------------------------------
+# Geometry (Position Equations)
+# ----------------------------------------------------------------------------
+# All positions relative to the pivot point.
+# These define where each body/point is given the current DOF values.
+
+geometry:
+  arm_cg:
+    description: Center of gravity of the arm
+    x: "-LAcg * sin(Aq)"
+    y: "-LAcg * cos(Aq)"
+
+  counterweight_attach:
+    description: Point where CW rod attaches to the short arm
+    x: "LAs * sin(Aq)"
+    y: "LAs * cos(Aq)"
+
+  counterweight:
+    description: Center of mass of the counterweight
+    x: "LAs * sin(Aq) + LW * sin(Aq + Wq)"
+    y: "LAs * cos(Aq) + LW * cos(Aq + Wq)"
+
+  sling_attach:
+    description: Point where sling attaches to the long arm tip
+    x: "-LAl * sin(Aq)"
+    y: "-LAl * cos(Aq)"
+
+  projectile:
+    description: Position of the projectile (when attached to sling)
+    x: "-LAl * sin(Aq) - LS * sin(Aq + Sq)"
+    y: "-LAl * cos(Aq) - LS * cos(Aq + Sq)"
+    note: >
+      In the physics frame, height above ground =
+      h + LAl * cos(Aq) + LS * cos(Aq + Sq)
+
+# ----------------------------------------------------------------------------
+# Energy Source
+# ----------------------------------------------------------------------------
+energy_source:
+  type: gravitational
+  description: >
+    The counterweight falls under gravity, converting gravitational PE
+    into kinetic energy of the system.
+
+# ----------------------------------------------------------------------------
+# Simulation Stages
+# ----------------------------------------------------------------------------
+stages:
+  ground:
+    name: Ground Constrained
+    description: >
+      Projectile slides along the ground. The sling angle Sq is NOT a free DOF—
+      it is determined by the ground constraint:
+        LAl * cos(Aq) + LS * cos(Aq + Sq) = -h
+      This reduces the system to 2 DOFs: Aq, Wq.
+    active_dofs: [Aq, Wq]
+    constrained_dofs:
+      Sq: "ground constraint — cos(Aq+Sq) = (-h - LAl*cos(Aq)) / LS"
+    transition_to: lifted
+    transition_condition: >
+      The vertical acceleration of the projectile becomes upward (positive).
+      Computed via the "liftoff metric":
+        LAl*cos(Aq)*Aw² + LAl*sin(Aq)*Awd + LS*cos(Aq+Sq)*(Aw+Sw)² + LS*sin(Aq+Sq)*(Awd+Swd) > 0
+      where Awd, Swd are the angular accelerations from the stage 2 (unconstrained) ODE.
+
+  lifted:
+    name: Projectile Lifted
+    description: >
+      Projectile is airborne but still attached to the sling. All 3 DOFs
+      (Aq, Wq, Sq) are free. Full 3×3 Lagrangian system.
+    active_dofs: [Aq, Wq, Sq]
+    transition_to: flight
+    transition_condition: >
+      Release occurs when the projectile's velocity direction reaches the
+      release angle threshold:
+        atan2(vy, vx) crosses releaseAngle (from above)
+      AND vx > 0 AND speed > 0.5 m/s.
+
+  flight:
+    name: Free Flight
+    description: >
+      Projectile is released and follows ballistic trajectory with optional
+      air drag. The trebuchet mechanism continues as a 2-DOF system
+      (Aq, Wq) in post-release mode (no projectile forces).
+    projectile_physics: >
+      Ballistic with optional quadratic drag:
+        ax = -drag * (vx - wind)
+        ay = -g - drag * vy
+      where drag = (ρ * Cd * A * speed) / (2 * mP)
+    trebuchet_physics: >
+      Post-release 2-DOF system (Aq, Wq only). Same Lagrangian as
+      stage 2 but with mP = 0 (no projectile terms).
+    transition_to: done
+    transition_condition: "Projectile y-position crosses 0 (ground level) from above"
+
+# ----------------------------------------------------------------------------
+# Lagrangian Mechanics
+# ----------------------------------------------------------------------------
+# The equations of motion are derived from the Lagrangian L = T - V.
+#
+# For the LIFTED stage (3 DOFs), the mass matrix M and forcing vector r are:
+#
+# State vector: [Aq, Wq, Sq, Aw, Ww, Sw]  (angles, angular velocities)
+#
+# Mass matrix (symmetric):
+#   M11 = IA3 + IW3 + mA*LAcg² + mP*(LAl² + LS² + 2*LAl*LS*cos(Sq))
+#         + mW*(LAs² + LW² + 2*LAs*LW*cos(Wq))
+#   M12 = IW3 + LW*mW*(LW + LAs*cos(Wq))
+#   M13 = LS*mP*(LS + LAl*cos(Sq))
+#   M22 = IW3 + mW*LW²
+#   M23 = 0
+#   M33 = mP*LS²
+#
+# Forcing (gravity + Coriolis/centrifugal):
+#   r1 = g*LAcg*mA*sin(Aq) + g*mP*(LAl*sin(Aq) + LS*sin(Aq+Sq))
+#        - g*mW*(LAs*sin(Aq) + LW*sin(Aq+Wq))
+#        - LAl*LS*mP*sin(Sq)*(Aw² - (Aw+Sw)²)
+#        - LAs*LW*mW*sin(Wq)*(Aw² - (Aw+Ww)²)
+#   r2 = -LW*mW*(g*sin(Aq+Wq) + LAs*sin(Wq)*Aw²)
+#   r3 = LS*mP*(g*sin(Aq+Sq) - LAl*sin(Sq)*Aw²)
+#
+# Solve: M * [Awd, Wwd, Swd]ᵀ = [r1, r2, r3]ᵀ
+#
+# GROUND stage: Sq is constrained, so the 3×3 reduces to a 2×2 system
+# with modified terms accounting for the constraint force.
+#
+# POST-RELEASE stage: mP terms drop out, leaving a 2×2 system for Aq, Wq.
+
+# ----------------------------------------------------------------------------
+# User-Configurable Parameters (for UI)
+# ----------------------------------------------------------------------------
+ui_parameters:
+  - key: LAl
+    label: Arm Length (Projectile)
+    unit: m
+    min: 0.5
+    max: 50
+    step: 0.1
+    default: 2.07
+
+  - key: LAs
+    label: Arm Length (Counterweight)
+    unit: m
+    min: 0.1
+    max: 20
+    step: 0.1
+    default: 0.533
+
+  - key: h
+    label: Pivot Height
+    unit: m
+    min: 0.5
+    max: 40
+    step: 0.1
+    default: 1.524
+
+  - key: mW
+    label: Counterweight Mass
+    unit: kg
+    min: 1
+    max: 5000
+    step: 1
+    default: 44.49
+
+  - key: LW
+    label: CW Hanging Length
+    unit: m
+    min: 0.1
+    max: 10
+    step: 0.1
+    default: 0.61
+
+  - key: mP
+    label: Projectile Mass
+    unit: kg
+    min: 0.01
+    max: 200
+    step: 0.01
+    default: 0.149
+
+  - key: LS
+    label: Sling Length
+    unit: m
+    min: 0.1
+    max: 30
+    step: 0.1
+    default: 2.08
+
+  - key: mA
+    label: Arm Mass
+    unit: kg
+    min: 0.5
+    max: 500
+    step: 0.5
+    default: 4.83
+
+  - key: releaseAngle
+    label: Release Angle
+    unit: "°"
+    min: 10
+    max: 80
+    step: 1
+    default: 45
+
+# ----------------------------------------------------------------------------
+# Rendering
+# ----------------------------------------------------------------------------
+rendering:
+  components:
+    - name: frame_post
+      type: line
+      from: ground_below_pivot  # (0, h) in world
+      to: pivot  # (0, 0)
+      style: { color: "#a87c4f", width_factor: 0.2, cap: round }
+
+    - name: arm_beam
+      type: line
+      from: counterweight_attach
+      to: sling_attach
+      style: { color: "#e2e8f0", width_factor: 0.12 }
+
+    - name: cw_rod
+      type: line
+      from: counterweight_attach
+      to: counterweight
+      style: { color: "#cbd5e1", width_factor: 0.07 }
+
+    - name: sling_rope
+      type: line
+      from: sling_attach
+      to: projectile  # or dangling sling tip in flight
+      style: { color: "#f8fafc", width_factor: 0.07 }
+
+    - name: pivot_dot
+      type: circle
+      at: pivot
+      style: { color: "#f8fafc", radius: 8 }
+
+    - name: counterweight_box
+      type: square
+      at: counterweight
+      style: { color: "#f59e0b", size_factor: 0.24 }
+
+    - name: projectile_ball
+      type: circle
+      at: projectile
+      style: { color: "#fb7185", radius_factor: 0.09 }

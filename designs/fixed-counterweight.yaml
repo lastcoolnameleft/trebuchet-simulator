@@ -1,0 +1,418 @@
+# ============================================================================
+# Trebuchet Design Specification: Fixed Counterweight (FCW)
+# ============================================================================
+# The counterweight is rigidly attached to the short arm — no hinge.
+# This removes one degree of freedom compared to the Hinged CW design.
+# ============================================================================
+
+name: Fixed Counterweight Trebuchet
+abbreviation: FCW
+description: >
+  A trebuchet where the counterweight is rigidly bolted to the short arm end.
+  Unlike the hinged counterweight design, the CW cannot swing independently —
+  it follows the arm's rotation exactly. This is mechanically simpler but
+  less efficient, as the counterweight traces an arc rather than dropping
+  straight down.
+
+# ----------------------------------------------------------------------------
+# Coordinate Convention
+# ----------------------------------------------------------------------------
+coordinate_system:
+  origin: pivot
+  angle_reference: downward_vertical
+  angle_positive: counterclockwise
+  y_axis: up_in_physics  # renderer flips to y-down
+
+# ----------------------------------------------------------------------------
+# Rigid Bodies
+# ----------------------------------------------------------------------------
+bodies:
+  frame:
+    description: Fixed support structure holding the pivot at height h above ground
+    type: fixed
+    parameters:
+      - name: h
+        label: Pivot Height
+        unit: m
+        description: Height of the pivot point above the ground
+        default: 1.524
+
+  arm_with_counterweight:
+    description: >
+      Rigid beam with counterweight fixed at the short end. The counterweight
+      is NOT a separate body — it is part of the arm. The CW's mass is
+      concentrated at distance LAs from the pivot on the short side.
+    type: rigid
+    parameters:
+      - name: LAl
+        label: Arm Length (Long/Projectile side)
+        unit: m
+        description: Distance from pivot to sling attachment point
+        default: 2.0726
+      - name: LAs
+        label: Arm Length (Short/CW side)
+        unit: m
+        description: Distance from pivot to the CW center of mass
+        default: 0.5334
+      - name: LAcg
+        label: Arm CG Distance
+        unit: m
+        description: >
+          Distance from pivot to the arm-only center of gravity (on the long side).
+          Note: the combined CG of arm+CW is NOT used directly — each contributes
+          separately to the Lagrangian.
+        default: 0.7681
+      - name: mA
+        label: Arm Mass
+        unit: kg
+        default: 4.8307
+      - name: IA3
+        label: Arm Moment of Inertia
+        unit: kg·m²
+        description: Moment of inertia of the arm (without CW) about the pivot
+        default: 2.7287
+      - name: mW
+        label: Counterweight Mass
+        unit: kg
+        default: 44.4933
+
+  sling:
+    description: Flexible rope/pouch carrying the projectile, attached to long arm tip
+    type: massless_link
+    parameters:
+      - name: LS
+        label: Sling Length
+        unit: m
+        default: 2.0828
+
+  projectile:
+    description: The object being launched
+    type: point_mass
+    parameters:
+      - name: mP
+        label: Projectile Mass
+        unit: kg
+        default: 0.1497
+
+# ----------------------------------------------------------------------------
+# Joints / Connections
+# ----------------------------------------------------------------------------
+joints:
+  pivot:
+    connects: [arm_with_counterweight, frame]
+    type: revolute
+    location: origin (0, 0) at height h above ground
+
+  counterweight_fixed:
+    connects: [counterweight_mass, arm]
+    type: rigid  # NO hinge — CW is welded to the arm
+    location: short arm tip (distance LAs from pivot)
+    note: >
+      Because the CW is rigidly fixed, it has no independent angle.
+      Its position is fully determined by Aq alone.
+
+  sling_attachment:
+    connects: [sling, arm]
+    type: revolute
+    location: long arm tip (distance LAl from pivot)
+
+  sling_projectile:
+    connects: [sling, projectile]
+    type: release
+    location: sling tip (distance LS from sling attachment)
+    release_condition: see stages.release below
+
+# ----------------------------------------------------------------------------
+# Degrees of Freedom
+# ----------------------------------------------------------------------------
+# Key difference from HCW: NO Wq. Only 2 DOFs.
+degrees_of_freedom:
+  - name: Aq
+    label: Arm Angle
+    body: arm_with_counterweight
+    description: >
+      Angle of the arm from downward vertical. When Aq = 0, the long arm
+      points straight down. Increases counterclockwise.
+    initial_value: >
+      Computed so the long arm tip is at ground level:
+      Aq0 = π - acos(h / LAl)
+      If h > LAl, use Aq0 = 14π/15 (near-vertical fallback).
+
+  - name: Sq
+    label: Sling Angle
+    body: sling
+    description: >
+      Angle of the sling relative to the arm direction.
+    initial_value: >
+      Determined by the ground constraint:
+      LAl * cos(Aq) + LS * cos(Aq + Sq) = -h
+      Solve for Sq choosing the solution where Aq + Sq is in (π, 2π).
+
+  # REMOVED vs HCW:
+  # - Wq (counterweight angle) — does not exist in this design.
+  #   The CW is rigidly fixed to the arm, so its position is
+  #   fully determined by Aq.
+
+# ----------------------------------------------------------------------------
+# Geometry (Position Equations)
+# ----------------------------------------------------------------------------
+# All positions relative to the pivot point.
+
+geometry:
+  arm_cg:
+    description: Center of gravity of the arm (without CW)
+    x: "-LAcg * sin(Aq)"
+    y: "-LAcg * cos(Aq)"
+
+  counterweight:
+    description: >
+      Center of mass of the fixed counterweight. Because it is rigid with the
+      arm, its position depends ONLY on Aq — no Wq term.
+    x: "LAs * sin(Aq)"
+    y: "LAs * cos(Aq)"
+    note: >
+      Compare to HCW where CW position was:
+        x = LAs*sin(Aq) + LW*sin(Aq+Wq)
+        y = LAs*cos(Aq) + LW*cos(Aq+Wq)
+      Here, the CW IS at the arm tip — no hanging rod, no Wq.
+
+  sling_attach:
+    description: Point where sling attaches to the long arm tip
+    x: "-LAl * sin(Aq)"
+    y: "-LAl * cos(Aq)"
+
+  projectile:
+    description: Position of the projectile (when attached to sling)
+    x: "-LAl * sin(Aq) - LS * sin(Aq + Sq)"
+    y: "-LAl * cos(Aq) - LS * cos(Aq + Sq)"
+    note: >
+      Identical to HCW — the sling/projectile geometry is unchanged.
+      Height above ground = h + LAl * cos(Aq) + LS * cos(Aq + Sq)
+
+# ----------------------------------------------------------------------------
+# Energy Source
+# ----------------------------------------------------------------------------
+energy_source:
+  type: gravitational
+  description: >
+    The fixed counterweight falls under gravity as the arm rotates,
+    converting gravitational PE into kinetic energy. Less efficient than
+    hinged because the CW follows an arc rather than dropping vertically.
+
+# ----------------------------------------------------------------------------
+# Simulation Stages
+# ----------------------------------------------------------------------------
+stages:
+  ground:
+    name: Ground Constrained
+    description: >
+      Projectile slides along the ground. Sq is constrained by:
+        LAl * cos(Aq) + LS * cos(Aq + Sq) = -h
+      This reduces the system to 1 DOF: Aq only.
+    active_dofs: [Aq]
+    constrained_dofs:
+      Sq: "ground constraint — cos(Aq+Sq) = (-h - LAl*cos(Aq)) / LS"
+    transition_to: lifted
+    transition_condition: >
+      The vertical acceleration of the projectile becomes upward.
+      Same liftoff metric as HCW but with no Wq terms:
+        LAl*cos(Aq)*Aw² + LAl*sin(Aq)*Awd
+        + LS*cos(Aq+Sq)*(Aw+Sw)² + LS*sin(Aq+Sq)*(Awd+Swd) > 0
+
+  lifted:
+    name: Projectile Lifted
+    description: >
+      Projectile is airborne but still attached to sling. Both DOFs
+      (Aq, Sq) are free. 2×2 Lagrangian system.
+    active_dofs: [Aq, Sq]
+    transition_to: flight
+    transition_condition: >
+      Release when projectile velocity direction reaches releaseAngle:
+        atan2(vy, vx) crosses releaseAngle (from above)
+      AND vx > 0 AND speed > 0.5 m/s.
+
+  flight:
+    name: Free Flight
+    description: >
+      Projectile follows ballistic trajectory with optional air drag.
+      The arm continues as a 1-DOF pendulum (Aq only, no projectile).
+    projectile_physics: >
+      Ballistic with quadratic drag:
+        ax = -drag * (vx - wind)
+        ay = -g - drag * vy
+    trebuchet_physics: >
+      Post-release 1-DOF system: simple compound pendulum with
+      arm mass at LAcg and CW mass at LAs.
+        I_total * Aw_dot = g * (mA * LAcg - mW * LAs) * sin(Aq)
+      where I_total = IA3 + mW * LAs²
+    transition_to: done
+    transition_condition: "Projectile y-position crosses 0 from above"
+
+# ----------------------------------------------------------------------------
+# Lagrangian Mechanics
+# ----------------------------------------------------------------------------
+# Derived from L = T - V with 2 generalized coordinates: Aq, Sq.
+#
+# Kinetic energy contributions:
+#   Arm:        T_arm = (1/2) * IA3 * Aw²
+#   CW (fixed): T_cw  = (1/2) * mW * LAs² * Aw²
+#     (point mass at distance LAs from pivot, rotating with arm)
+#   Projectile: T_proj = (1/2) * mP * v_proj²
+#     where v_proj² = LAl²*Aw² + LS²*(Aw+Sw)² + 2*LAl*LS*cos(Sq)*Aw*(Aw+Sw)
+#
+# Potential energy (y-up, ground at y=0):
+#   V_arm = -mA * g * LAcg * cos(Aq)    (arm CG below pivot when Aq≈π)
+#   V_cw  = mW * g * LAs * cos(Aq)      (CW above pivot on short side)
+#   V_proj = mP * g * (h + LAl*cos(Aq) + LS*cos(Aq+Sq))
+#
+# LIFTED stage (2 DOFs) mass matrix and forcing:
+#
+#   M11 = IA3 + mW*LAs² + mA*LAcg² + mP*(LAl² + LS² + 2*LAl*LS*cos(Sq))
+#   M12 = LS*mP*(LS + LAl*cos(Sq))
+#   M22 = mP*LS²
+#
+#   r1 = g*LAcg*mA*sin(Aq) - g*mW*LAs*sin(Aq)
+#        + g*mP*(LAl*sin(Aq) + LS*sin(Aq+Sq))
+#        - LAl*LS*mP*sin(Sq)*(Aw² - (Aw+Sw)²)
+#   r2 = LS*mP*(g*sin(Aq+Sq) - LAl*sin(Sq)*Aw²)
+#
+#   Solve: [M11, M12; M12, M22] * [Awd; Swd] = [r1; r2]
+#
+# Compare to HCW:
+#   - M11 loses the IW3 and mW*(LW² + 2*LAs*LW*cos(Wq)) terms
+#   - M11 gains the simpler mW*LAs² term (point mass on rigid arm)
+#   - M12 for the Wq coupling row/column is gone entirely
+#   - r1 loses the -g*mW*LW*sin(Aq+Wq) and LAs*LW*mW*sin(Wq)*(...) terms
+#   - The 3×3 system becomes 2×2
+#
+# GROUND stage: Sq is constrained, reducing to 1 DOF (Aq).
+#   The equation becomes a scalar ODE after substituting the constraint.
+#
+# POST-RELEASE: 1 DOF (Aq only). Simple pendulum:
+#   (IA3 + mW*LAs² + mA*LAcg²) * Awd = g*(mA*LAcg - mW*LAs)*sin(Aq)
+
+# ----------------------------------------------------------------------------
+# User-Configurable Parameters (for UI)
+# ----------------------------------------------------------------------------
+ui_parameters:
+  - key: LAl
+    label: Arm Length (Projectile)
+    unit: m
+    min: 0.5
+    max: 50
+    step: 0.1
+    default: 2.07
+
+  - key: LAs
+    label: Arm Length (Counterweight)
+    unit: m
+    min: 0.1
+    max: 20
+    step: 0.1
+    default: 0.533
+
+  - key: h
+    label: Pivot Height
+    unit: m
+    min: 0.5
+    max: 40
+    step: 0.1
+    default: 1.524
+
+  - key: mW
+    label: Counterweight Mass
+    unit: kg
+    min: 1
+    max: 5000
+    step: 1
+    default: 44.49
+
+  # NOTE: No LW (CW Hanging Length) — CW is fixed to arm
+  # NOTE: No IW3 (CW moment of inertia about hinge) — no hinge exists
+
+  - key: mP
+    label: Projectile Mass
+    unit: kg
+    min: 0.01
+    max: 200
+    step: 0.01
+    default: 0.149
+
+  - key: LS
+    label: Sling Length
+    unit: m
+    min: 0.1
+    max: 30
+    step: 0.1
+    default: 2.08
+
+  - key: mA
+    label: Arm Mass
+    unit: kg
+    min: 0.5
+    max: 500
+    step: 0.5
+    default: 4.83
+
+  - key: releaseAngle
+    label: Release Angle
+    unit: "°"
+    min: 10
+    max: 80
+    step: 1
+    default: 45
+
+# ----------------------------------------------------------------------------
+# Rendering
+# ----------------------------------------------------------------------------
+rendering:
+  components:
+    - name: frame_post
+      type: line
+      from: ground_below_pivot
+      to: pivot
+      style: { color: "#a87c4f", width_factor: 0.2, cap: round }
+
+    - name: arm_beam
+      type: line
+      from: counterweight  # CW IS the short arm tip — no hanging rod
+      to: sling_attach
+      style: { color: "#e2e8f0", width_factor: 0.12 }
+
+    # NOTE: No cw_rod component — CW is at the arm tip, not hanging below it
+
+    - name: sling_rope
+      type: line
+      from: sling_attach
+      to: projectile
+      style: { color: "#f8fafc", width_factor: 0.07 }
+
+    - name: pivot_dot
+      type: circle
+      at: pivot
+      style: { color: "#f8fafc", radius: 8 }
+
+    - name: counterweight_box
+      type: square
+      at: counterweight  # drawn at arm tip
+      style: { color: "#f59e0b", size_factor: 0.24 }
+
+    - name: projectile_ball
+      type: circle
+      at: projectile
+      style: { color: "#fb7185", radius_factor: 0.09 }
+
+# ----------------------------------------------------------------------------
+# Key Differences from Hinged Counterweight (HCW)
+# ----------------------------------------------------------------------------
+# 1. No Wq DOF — the CW is rigidly fixed to the arm
+# 2. No LW parameter — no hanging rod
+# 3. No IW3 parameter — no CW moment of inertia about a hinge
+# 4. 3×3 mass matrix → 2×2 (lifted stage)
+# 5. 2×2 mass matrix → scalar (ground stage)
+# 6. Post-release is a simple compound pendulum (1 DOF)
+# 7. CW position = (LAs*sin(Aq), LAs*cos(Aq)) — just a point on the arm
+# 8. No cw_rod rendering component
+# 9. Arm beam is drawn from CW position to sling attach
+#    (same visual, but CW box is at arm tip, not dangling below)
+# 10. Generally less efficient — CW follows an arc, not a vertical drop

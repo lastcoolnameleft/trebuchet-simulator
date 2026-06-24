@@ -23,6 +23,11 @@ export interface TrebuchetGeometry {
   counterweight: Point;
   slingAttach: Point;
   projectile: Point;
+  pivotY?: number; // Pivot y-offset in renderer y-DOWN coords (default 0)
+  tracks?: {
+    vertical?: { x: number; yTop: number; yBottom: number };
+    horizontal?: { x: number; y: number; length: number }; // fixed pin position + arm slot
+  };
 }
 
 export function computeTrebuchetGeometry(params: GeometryParams, pose: TrebuchetPose): TrebuchetGeometry {

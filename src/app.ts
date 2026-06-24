@@ -1,30 +1,10 @@
 import { TrebuchetRenderer } from './renderer';
-import {
-  createInitialSample,
-  defaultParams,
-  findSampleAtTime,
-  normalizeParams,
-  simulateTrebuchet,
-  type SimulationResult,
-  type SimulationSample,
-  type TrebuchetParams,
-} from './physics';
-
-// Parameter config for the UI (maps to physics params)
-const parameterConfig: Array<{ id: string; physicsKey: keyof TrebuchetParams; label: string; unit: string; step: number; min: number; max: number; default: number }> = [
-  { id: 'projectileArmLength', physicsKey: 'LAl', label: 'Arm Length (Projectile)', unit: 'm', step: 0.1, min: 0.5, max: 50, default: 2.07 },
-  { id: 'counterweightArmLength', physicsKey: 'LAs', label: 'Arm Length (Counterweight)', unit: 'm', step: 0.1, min: 0.1, max: 20, default: 0.533 },
-  { id: 'armHeight', physicsKey: 'h', label: 'Pivot Height', unit: 'm', step: 0.1, min: 0.5, max: 40, default: 1.524 },
-  { id: 'counterweightMass', physicsKey: 'mW', label: 'Counterweight Mass', unit: 'kg', step: 1, min: 1, max: 5000, default: 44.49 },
-  { id: 'cwHangLength', physicsKey: 'LW', label: 'CW Hanging Length', unit: 'm', step: 0.1, min: 0.1, max: 10, default: 0.61 },
-  { id: 'projectileMass', physicsKey: 'mP', label: 'Projectile Mass', unit: 'kg', step: 0.01, min: 0.01, max: 200, default: 0.149 },
-  { id: 'slingLength', physicsKey: 'LS', label: 'Sling Length', unit: 'm', step: 0.1, min: 0.1, max: 30, default: 2.08 },
-  { id: 'armMass', physicsKey: 'mA', label: 'Arm Mass', unit: 'kg', step: 0.5, min: 0.5, max: 500, default: 4.83 },
-  { id: 'releaseAngle', physicsKey: 'releaseAngle', label: 'Release Angle', unit: '°', step: 1, min: 10, max: 80, default: 45 },
-];
+import { findSampleAtTime, type SimulationResult, type TrebuchetParams } from './physics';
+import { designs, defaultDesignId, type TrebuchetDesign, type ParameterConfig } from './designs';
 
 // State
 let renderer: TrebuchetRenderer;
+let currentDesign: TrebuchetDesign = designs[defaultDesignId];
 let currentResult: SimulationResult | null = null;
 let animationFrame = 0;
 let animationStart = 0;
@@ -40,7 +20,9 @@ document.addEventListener('DOMContentLoaded', () => {
   canvas.height = rect.height;
 
   renderer = new TrebuchetRenderer(canvas);
+  renderer.setGeometryFunction(currentDesign.computeGeometry);
 
+  buildDesignSelector();
   buildParameterInputs();
   setupControls();
   renderPreview();
@@ -62,12 +44,48 @@ window.addEventListener('resize', () => {
   }
 });
 
+function buildDesignSelector(): void {
+  const select = document.getElementById('trebuchetType') as HTMLSelectElement;
+  if (!select) return;
+  select.innerHTML = '';
+
+  for (const design of Object.values(designs)) {
+    const option = document.createElement('option');
+    option.value = design.id;
+    option.textContent = design.name;
+    if (design.id === currentDesign.id) option.selected = true;
+    select.appendChild(option);
+  }
+
+  select.addEventListener('change', () => {
+    const design = designs[select.value];
+    if (!design) return;
+    switchDesign(design);
+  });
+}
+
+function switchDesign(design: TrebuchetDesign): void {
+  currentDesign = design;
+  renderer.setGeometryFunction(design.computeGeometry);
+
+  // Reset simulation state
+  cancelAnimationFrame(animationFrame);
+  currentResult = null;
+  paused = true;
+  pausedTime = 0;
+  document.getElementById('pauseBtn')!.textContent = 'Fire';
+
+  buildParameterInputs();
+  clearStats();
+  renderPreview();
+}
+
 function buildParameterInputs(): void {
   const container = document.querySelector('.section .parameters') as HTMLElement;
   if (!container) return;
   container.innerHTML = '';
 
-  parameterConfig.forEach(param => {
+  currentDesign.parameterConfig.forEach(param => {
     const group = document.createElement('div');
     group.className = 'param-group';
 
@@ -102,7 +120,7 @@ function buildParameterInputs(): void {
 
 function readPhysicsParams(): Partial<TrebuchetParams> {
   const params: Partial<TrebuchetParams> = {};
-  parameterConfig.forEach(config => {
+  currentDesign.parameterConfig.forEach(config => {
     const input = document.getElementById(config.id) as HTMLInputElement;
     if (input && input.value) {
       (params as any)[config.physicsKey] = parseFloat(input.value);
@@ -113,7 +131,7 @@ function readPhysicsParams(): Partial<TrebuchetParams> {
 
 function renderPreview(): void {
   try {
-    const { params, sample } = createInitialSample(readPhysicsParams());
+    const { params, sample } = currentDesign.createInitialSample(readPhysicsParams());
     renderer.drawPreview(params, sample);
   } catch (e) {
     console.error('renderPreview failed:', e);
@@ -209,7 +227,7 @@ function fire(): void {
 
   try {
     const params = readPhysicsParams();
-    currentResult = simulateTrebuchet(params);
+    currentResult = currentDesign.simulate(params);
     renderer.setSimulation(currentResult);
     updateFinalStats(currentResult);
     animationStart = performance.now();

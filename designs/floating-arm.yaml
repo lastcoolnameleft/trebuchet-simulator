@@ -1,0 +1,485 @@
+# ============================================================================
+# Trebuchet Design Specification: Floating Arm Trebuchet (FAT)
+# ============================================================================
+# The pivot slides vertically on guide rails. The counterweight is fixed to
+# the short arm. As the CW drops, the pivot slides down and the arm rotates,
+# launching the projectile. Most efficient common trebuchet design.
+# ============================================================================
+
+name: Floating Arm Trebuchet
+abbreviation: FAT
+description: >
+  A trebuchet where the arm's pivot point slides vertically on guide rails
+  mounted on the frame. The counterweight is rigidly fixed to the short arm
+  end. As the counterweight falls, the pivot drops straight down while the
+  arm rotates, converting nearly all gravitational PE into projectile KE.
+  This is the most efficient common trebuchet design.
+
+# ----------------------------------------------------------------------------
+# Coordinate Convention
+# ----------------------------------------------------------------------------
+coordinate_system:
+  origin: top_of_guide_rails  # pivot starts here
+  angle_reference: downward_vertical
+  angle_positive: counterclockwise
+  y_axis: up_in_physics  # y=0 at rail top, positive up
+
+# ----------------------------------------------------------------------------
+# Rigid Bodies
+# ----------------------------------------------------------------------------
+bodies:
+  frame:
+    description: >
+      Fixed support structure with vertical guide rails. The rails extend
+      from the top of the frame (height h above ground) downward.
+    type: fixed
+    parameters:
+      - name: h
+        label: Frame Height / Rail Top
+        unit: m
+        description: Height of the top of the guide rails above the ground
+        default: 1.524
+      - name: railLength
+        label: Rail Length
+        unit: m
+        description: >
+          Maximum distance the pivot can drop along the rails.
+          The pivot stops when it reaches ground level or the rail end.
+        default: 1.524
+        note: Typically equal to h (rails go to ground level)
+
+  arm_with_counterweight:
+    description: >
+      Rigid beam with counterweight fixed at the short end.
+      The arm's axle sits in the vertical guide rails and can slide freely.
+    type: rigid
+    parameters:
+      - name: LAl
+        label: Arm Length (Long/Projectile side)
+        unit: m
+        description: Distance from pivot to sling attachment point
+        default: 2.0726
+      - name: LAs
+        label: Arm Length (Short/CW side)
+        unit: m
+        description: Distance from pivot to the fixed CW center of mass
+        default: 0.5334
+      - name: LAcg
+        label: Arm CG Distance
+        unit: m
+        description: Distance from pivot to arm-only center of gravity (on long side)
+        default: 0.7681
+      - name: mA
+        label: Arm Mass
+        unit: kg
+        default: 4.8307
+      - name: IA3
+        label: Arm Moment of Inertia
+        unit: kg·m²
+        description: Moment of inertia of the arm about the pivot
+        default: 2.7287
+      - name: mW
+        label: Counterweight Mass
+        unit: kg
+        default: 44.4933
+
+  sling:
+    description: Flexible rope/pouch attached to long arm tip
+    type: massless_link
+    parameters:
+      - name: LS
+        label: Sling Length
+        unit: m
+        default: 2.0828
+
+  projectile:
+    description: The object being launched
+    type: point_mass
+    parameters:
+      - name: mP
+        label: Projectile Mass
+        unit: kg
+        default: 0.1497
+
+# ----------------------------------------------------------------------------
+# Joints / Connections
+# ----------------------------------------------------------------------------
+joints:
+  pivot_on_rails:
+    connects: [arm_with_counterweight, frame]
+    type: prismatic_revolute  # slides vertically AND rotates
+    location: on vertical guide rails
+    constraints:
+      - Pivot slides freely along vertical rails (1 translational DOF: Yp)
+      - Arm rotates freely around pivot (1 rotational DOF: Aq)
+      - Horizontal pivot position is fixed (constrained to x=0)
+    note: >
+      This is the KEY difference from HCW/FCW. The pivot is NOT fixed.
+      It translates vertically, adding a DOF. The rail constrains it
+      to move only in the vertical direction.
+
+  counterweight_fixed:
+    connects: [counterweight_mass, arm]
+    type: rigid
+    location: short arm tip (distance LAs from pivot)
+
+  sling_attachment:
+    connects: [sling, arm]
+    type: revolute
+    location: long arm tip (distance LAl from pivot)
+
+  sling_projectile:
+    connects: [sling, projectile]
+    type: release
+    location: sling tip (distance LS from sling attachment)
+
+# ----------------------------------------------------------------------------
+# Degrees of Freedom
+# ----------------------------------------------------------------------------
+degrees_of_freedom:
+  - name: Yp
+    label: Pivot Height
+    body: pivot_on_rails
+    description: >
+      Vertical position of the sliding pivot. Yp = 0 means the pivot is at
+      the top of the rails. Yp decreases (becomes negative) as the pivot
+      drops. Minimum Yp = -railLength (bottom of rails / ground level).
+    initial_value: "Yp0 = 0 (pivot starts at top of rails)"
+
+  - name: Aq
+    label: Arm Angle
+    body: arm_with_counterweight
+    description: >
+      Angle of the arm from downward vertical, measured at the (moving)
+      pivot. Increases counterclockwise.
+    initial_value: >
+      Computed so the long arm tip is at ground level:
+      The projectile starts on the ground at height 0 (ground level).
+      Ground height in physics frame = -(h + Yp).
+      At start, Yp = 0, so ground is at y = -h relative to pivot.
+      Aq0 = π - acos(h / LAl)
+
+  - name: Sq
+    label: Sling Angle
+    body: sling
+    description: >
+      Angle of the sling relative to the arm direction.
+    initial_value: >
+      Ground constraint with moving pivot:
+      Yp + LAl*cos(Aq) + LS*cos(Aq+Sq) = -h  (projectile at ground)
+      At start Yp=0: same as fixed-pivot constraint.
+
+# ----------------------------------------------------------------------------
+# Geometry (Position Equations)
+# ----------------------------------------------------------------------------
+# All positions relative to the TOP OF THE RAILS (initial pivot position).
+# The pivot is at (0, Yp) where Yp ≤ 0.
+
+geometry:
+  pivot:
+    description: Current position of the sliding pivot
+    x: "0"
+    y: "Yp"
+
+  arm_cg:
+    description: Center of gravity of the arm
+    x: "-LAcg * sin(Aq)"
+    y: "Yp - LAcg * cos(Aq)"
+
+  counterweight:
+    description: Center of mass of the fixed counterweight
+    x: "LAs * sin(Aq)"
+    y: "Yp + LAs * cos(Aq)"
+
+  sling_attach:
+    description: Long arm tip where sling attaches
+    x: "-LAl * sin(Aq)"
+    y: "Yp - LAl * cos(Aq)"
+
+  projectile:
+    description: Projectile position (when attached)
+    x: "-LAl * sin(Aq) - LS * sin(Aq + Sq)"
+    y: "Yp - LAl * cos(Aq) - LS * cos(Aq + Sq)"
+    note: >
+      Height above ground = h + Yp + LAl*cos(Aq) + LS*cos(Aq+Sq)
+      (since ground is at -(h) in rail-top frame when Yp=0)
+
+# ----------------------------------------------------------------------------
+# Energy Source
+# ----------------------------------------------------------------------------
+energy_source:
+  type: gravitational
+  description: >
+    The counterweight and arm fall under gravity. Because the pivot slides
+    vertically, the CW drops nearly straight down — far more efficient
+    than swinging on an arc (FCW) or hinging (HCW).
+
+# ----------------------------------------------------------------------------
+# Simulation Stages
+# ----------------------------------------------------------------------------
+stages:
+  ground:
+    name: Ground Constrained
+    description: >
+      Projectile on the ground. Sq is constrained:
+        Yp + LAl*cos(Aq) + LS*cos(Aq+Sq) = -h
+      This gives 2 free DOFs: Yp, Aq.
+    active_dofs: [Yp, Aq]
+    constrained_dofs:
+      Sq: "Yp + LAl*cos(Aq) + LS*cos(Aq+Sq) = -h"
+    transition_to: lifted
+    transition_condition: >
+      Vertical acceleration of projectile becomes upward (liftoff metric > 0).
+
+  lifted:
+    name: Projectile Lifted
+    description: >
+      All 3 DOFs free: Yp, Aq, Sq. Full 3×3 Lagrangian.
+    active_dofs: [Yp, Aq, Sq]
+    transition_to: flight
+    transition_condition: >
+      Release when atan2(vy, vx) crosses releaseAngle, vx > 0, speed > 0.5.
+    rail_constraint: >
+      If Yp reaches -railLength, the pivot stops: Yp is clamped and
+      Yp_dot is set to 0. The system then behaves like a fixed-pivot
+      FCW for the remainder of the attached stages.
+
+  flight:
+    name: Free Flight
+    description: >
+      Projectile follows ballistic trajectory. Arm freezes at release position.
+    projectile_physics: "Ballistic with quadratic drag"
+    transition_to: done
+    transition_condition: "Projectile y crosses ground level from above"
+
+# ----------------------------------------------------------------------------
+# Lagrangian Mechanics
+# ----------------------------------------------------------------------------
+# 3 generalized coordinates: q = [Yp, Aq, Sq]
+# State vector: [Yp, Aq, Sq, Yp_dot, Aw, Sw]
+#
+# Kinetic energy:
+#   T_arm = (1/2)*mA*(Yp_dot² + LAcg²*Aw² + 2*LAcg*sin(Aq)*Yp_dot*Aw)
+#         + (1/2)*IA3*Aw²
+#     (IA3 already includes the arm's rotational inertia about pivot)
+#     (Actually IA3 accounts for the distributed mass, so we use IA3 for rotation
+#      and mA*Yp_dot² for translation of the full arm mass, plus cross terms)
+#
+#   Simplification: treat arm contribution as:
+#     T_arm = (1/2)*IA3*Aw² + (1/2)*mA*v_armCG²
+#     where v_armCG² = Yp_dot² + LAcg²*Aw² + 2*LAcg*sin(Aq)*Yp_dot*Aw
+#     But IA3 already includes mA*LAcg², so to avoid double-counting:
+#     T_arm = (1/2)*(IA3)*Aw² + (1/2)*mA*Yp_dot² + mA*LAcg*sin(Aq)*Yp_dot*Aw
+#     Wait — IA3 is moment about pivot. For a translating pivot, we need:
+#     T_arm = (1/2)*mA*v_cg² + (1/2)*I_cg*w² where I_cg = IA3 - mA*LAcg²
+#     OR equivalently: T_arm = (1/2)*IA3*Aw² + (1/2)*mA*Yp_dot²
+#                              + mA*LAcg*sin(Aq)*Aw*Yp_dot
+#     (using parallel axis: IA3 = I_cg + mA*LAcg², and expanding v_cg)
+#
+#   T_cw = (1/2)*mW*(vx_cw² + vy_cw²)
+#     vx_cw = LAs*cos(Aq)*Aw
+#     vy_cw = Yp_dot + LAs*sin(Aq)*Aw  (note: +sin because CW is on short side)
+#     Wait, let me be more careful with signs.
+#     CW position: (LAs*sin(Aq), Yp + LAs*cos(Aq))
+#     CW velocity:
+#       vx_cw = LAs*cos(Aq)*Aw
+#       vy_cw = Yp_dot - LAs*sin(Aq)*Aw  (d/dt of Yp + LAs*cos(Aq))
+#     Hmm, d/dt[LAs*cos(Aq)] = -LAs*sin(Aq)*Aw
+#     So vy_cw = Yp_dot - LAs*sin(Aq)*Aw
+#     v_cw² = LAs²*cos²(Aq)*Aw² + Yp_dot² - 2*LAs*sin(Aq)*Aw*Yp_dot + LAs²*sin²(Aq)*Aw²
+#           = Yp_dot² + LAs²*Aw² - 2*LAs*sin(Aq)*Aw*Yp_dot
+#
+#   T_proj = (1/2)*mP*v_proj²
+#     proj position: (-LAl*sin(Aq) - LS*sin(Aq+Sq), Yp - LAl*cos(Aq) - LS*cos(Aq+Sq))
+#     Let θ = Aq+Sq, θ_dot = Aw+Sw
+#     vx_proj = -LAl*cos(Aq)*Aw - LS*cos(θ)*θ_dot
+#     vy_proj = Yp_dot + LAl*sin(Aq)*Aw + LS*sin(θ)*θ_dot
+#     v_proj² = vx² + vy²
+#       = LAl²*Aw² + LS²*θ_dot² + 2*LAl*LS*cos(Sq)*Aw*θ_dot
+#         + Yp_dot² + 2*Yp_dot*(LAl*sin(Aq)*Aw + LS*sin(θ)*θ_dot)
+#
+# Potential energy (y-up, ground at y = -h):
+#   V = mA*g*(Yp - LAcg*cos(Aq))  [arm CG at Yp - LAcg*cos(Aq)]
+#     + mW*g*(Yp + LAs*cos(Aq))   [CW at Yp + LAs*cos(Aq)]
+#     + mP*g*(Yp - LAl*cos(Aq) - LS*cos(Aq+Sq))  [proj]
+#   (all relative to rail top, only differences matter)
+#
+# Mass matrix M (3×3, symmetric) for LIFTED stage:
+#   Let m_total = mA + mW + mP (total translating mass)
+#
+#   M[0][0] = m_total  (Yp_dot²)
+#   M[0][1] = mA*LAcg*sin(Aq) - mW*LAs*sin(Aq) + mP*LAl*sin(Aq)
+#           = (mA*LAcg - mW*LAs + mP*LAl)*sin(Aq)
+#           Wait, need to be more careful. Let me redo:
+#   From T, the Yp_dot*Aw cross terms:
+#     arm: +mA*LAcg*sin(Aq)  (from expanding v_armCG, but careful with sign)
+#     Actually: arm CG velocity vy = Yp_dot - LAcg*(-sin(Aq))*Aw
+#     arm CG pos: (x, y) = (-LAcg*sin(Aq), Yp - LAcg*cos(Aq))
+#     d/dt[y] = Yp_dot + LAcg*sin(Aq)*Aw
+#     d/dt[x] = -LAcg*cos(Aq)*Aw
+#     v² = LAcg²*cos²(Aq)*Aw² + (Yp_dot + LAcg*sin(Aq)*Aw)²
+#        = LAcg²*Aw² + Yp_dot² + 2*LAcg*sin(Aq)*Aw*Yp_dot
+#     So cross term for arm: mA*LAcg*sin(Aq)
+#
+#     CW: cross term: -mW*LAs*sin(Aq)  (from vy_cw = Yp_dot - LAs*sin(Aq)*Aw)
+#
+#     Proj: cross terms from vy_proj = Yp_dot + LAl*sin(Aq)*Aw + LS*sin(θ)*θ_dot
+#       Yp_dot*Aw: +mP*LAl*sin(Aq)
+#       Yp_dot*θ_dot: +mP*LS*sin(θ)  where θ=Aq+Sq
+#
+#   M[0][0] = mA + mW + mP = m_total
+#   M[0][1] = (mA*LAcg + mP*LAl - mW*LAs)*sin(Aq)
+#   M[0][2] = mP*LS*sin(Aq+Sq)
+#
+#   M[1][1] = IA3 + mW*LAs² + mP*(LAl² + LS² + 2*LAl*LS*cos(Sq))
+#     (same as FCW M11 but without mA*LAcg² since IA3 already includes it...
+#      actually IA3 = I_arm_about_pivot which DOES include mA*LAcg².
+#      But we also have mA*LAcg²*Aw² from the translational KE.
+#      Hmm, this is the tricky part with a translating pivot.
+#      Let me use the formulation: T_arm = (1/2)*mA*v_cg² + (1/2)*I_cg*ω²
+#      where I_cg = IA3 - mA*LAcg² and v_cg² includes both translation and rotation.
+#      Then M[1][1] from arm = I_cg + mA*LAcg² = IA3. OK so it works out.)
+#
+#   M[1][1] = IA3 + mW*LAs² + mP*(LAl² + LS² + 2*LAl*LS*cos(Sq))
+#   M[1][2] = mP*LS*(LS + LAl*cos(Sq))
+#   M[2][2] = mP*LS²
+#
+# Forcing vector (gravity + velocity-dependent terms):
+#   f[0] = -(mA + mW + mP)*g  (but wait, this is ∂V/∂Yp with sign)
+#     Actually from Lagrangian: f = ∂L/∂q - d/dt(∂L/∂q_dot)
+#     The gravity contributes: -∂V/∂Yp = -(mA+mW+mP)*g  [everything drops]
+#     Wait no: V = (mA+mW+mP)*g*Yp + ... so ∂V/∂Yp = (mA+mW+mP)*g
+#     Hmm, let me use proper convention. V increases with height.
+#     Actually with y-up: V = mA*g*(Yp - LAcg*cos(Aq)) + ...
+#     ∂V/∂Yp = (mA+mW+mP)*g
+#     So the forcing from gravity on Yp equation: -∂V/∂Yp = -(mA+mW+mP)*g
+#     Plus Coriolis/centrifugal terms from the cross terms in T.
+#
+#   This gets complex. See the implementation for the full derivation.
+#   The key insight is: it's the same Euler-Lagrange approach as HCW/FCW,
+#   just with one extra translational DOF.
+
+# ----------------------------------------------------------------------------
+# User-Configurable Parameters
+# ----------------------------------------------------------------------------
+ui_parameters:
+  - key: LAl
+    label: Arm Length (Projectile)
+    unit: m
+    min: 0.5
+    max: 50
+    step: 0.1
+    default: 2.07
+
+  - key: LAs
+    label: Arm Length (Counterweight)
+    unit: m
+    min: 0.1
+    max: 20
+    step: 0.1
+    default: 0.533
+
+  - key: h
+    label: Frame Height
+    unit: m
+    min: 0.5
+    max: 40
+    step: 0.1
+    default: 1.524
+
+  - key: mW
+    label: Counterweight Mass
+    unit: kg
+    min: 1
+    max: 5000
+    step: 1
+    default: 44.49
+
+  - key: mP
+    label: Projectile Mass
+    unit: kg
+    min: 0.01
+    max: 200
+    step: 0.01
+    default: 0.149
+
+  - key: LS
+    label: Sling Length
+    unit: m
+    min: 0.1
+    max: 30
+    step: 0.1
+    default: 2.08
+
+  - key: mA
+    label: Arm Mass
+    unit: kg
+    min: 0.5
+    max: 500
+    step: 0.5
+    default: 4.83
+
+  - key: releaseAngle
+    label: Release Angle
+    unit: "°"
+    min: 10
+    max: 80
+    step: 1
+    default: 45
+
+# ----------------------------------------------------------------------------
+# Rendering
+# ----------------------------------------------------------------------------
+rendering:
+  components:
+    - name: guide_rails
+      type: parallel_lines
+      from: rail_top  # (±offset, 0) at height h
+      to: rail_bottom  # (±offset, -railLength) at ground
+      style: { color: "#6b7280", width: 3, dash: [4, 4] }
+      note: Two vertical rails flanking the pivot
+
+    - name: frame_base
+      type: line
+      from: ground_left
+      to: ground_right
+      style: { color: "#a87c4f", width_factor: 0.2 }
+
+    - name: arm_beam
+      type: line
+      from: counterweight
+      to: sling_attach
+      style: { color: "#e2e8f0", width_factor: 0.12 }
+
+    - name: sling_rope
+      type: line
+      from: sling_attach
+      to: projectile
+      style: { color: "#f8fafc", width_factor: 0.07 }
+
+    - name: pivot_dot
+      type: circle
+      at: pivot  # moves down the rails!
+      style: { color: "#f8fafc", radius: 8 }
+
+    - name: counterweight_box
+      type: square
+      at: counterweight
+      style: { color: "#f59e0b", size_factor: 0.24 }
+
+    - name: projectile_ball
+      type: circle
+      at: projectile
+      style: { color: "#fb7185", radius_factor: 0.09 }
+
+# ----------------------------------------------------------------------------
+# Key Differences from Fixed Counterweight (FCW)
+# ----------------------------------------------------------------------------
+# 1. Pivot slides vertically (Yp DOF) — NOT fixed
+# 2. 3 DOFs (Yp, Aq, Sq) vs 2 DOFs (Aq, Sq) in FCW
+# 3. Mass matrix is 3×3 with translational-rotational coupling
+# 4. All bodies have translational KE from the dropping pivot
+# 5. Guide rails rendered as visual element
+# 6. Pivot dot moves during simulation
+# 7. Rail-bottom constraint: Yp ≥ -railLength (pivot can't drop below ground)
+# 8. Most efficient design — CW drops nearly vertically

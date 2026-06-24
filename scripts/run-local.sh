@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PORT="${PORT:-8080}"
+PORT="${PORT:-8010}"
 DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
 echo "Building trebuchet-simulator..."
