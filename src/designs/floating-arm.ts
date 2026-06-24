@@ -369,6 +369,13 @@ function stepFAT(state: FATState, p: FATParams, dt: number, config: 1 | 2 | 3 | 
   // Enforce constraints (position level stabilization)
   newState = enforceConstraints(newState, p, config);
 
+  // CW ground stop: CW cannot drop below h=0 (ground level)
+  // Applied after constraint enforcement to prevent override
+  if (newState[0] < 0) {
+    newState[0] = 0;       // clamp h at ground
+    if (newState[5] < 0) newState[5] = 0;  // zero downward hdot (inelastic stop)
+  }
+
   // Ramp normal force is the last lambda in configs 1 and 2
   // For configs 3 and 4, ramp is already off
   const rampNormal = (config === 1 || config === 2) ? lambda_forces[lambda_forces.length - 1] : -1;
@@ -511,19 +518,19 @@ function fatSimulate(input: Partial<TrebuchetParams>): SimulationResult {
       flightState = [newFx, newFy, newFvx, newFvy];
       ft += FIXED_DT;
 
+      // Hit ground (y <= 0) — stop before recording this sample
+      if (newFy <= 0) {
+        range = Math.abs(newFx - x);
+        flightTime = ft;
+        break;
+      }
+
       if (newFy > maxHeight) maxHeight = newFy;
       peakSpeed = Math.max(peakSpeed, Math.sqrt(newFvx * newFvx + newFvy * newFvy));
 
       // Record every 10 steps
       if (Math.round(ft / FIXED_DT) % 10 === 0) {
         flightSamples.push(makeFlightSample(flightState, p, releaseTime + ft, releaseState));
-      }
-
-      // Hit ground (y <= 0)
-      if (newFy <= 0) {
-        range = Math.abs(newFx - x);
-        flightTime = ft;
-        break;
       }
     }
   }

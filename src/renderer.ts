@@ -97,6 +97,9 @@ export class TrebuchetRenderer {
     const pivot = worldToScreen(this.viewport, 0, 0);
     const groundY = worldToScreen(this.viewport, 0, params.h).y;
 
+    // Ground clamp: no mechanism element renders below ground
+    const clampAtGround = (pt: { x: number; y: number }) => ({ x: pt.x, y: Math.min(pt.y, groundY) });
+
     // Scale element sizes based on frame height in pixels (consistent across designs)
     const frameHeightPx = params.h * this.viewport.scale;
     const armWidth = Math.max(3, frameHeightPx * 0.03);
@@ -168,12 +171,12 @@ export class TrebuchetRenderer {
     // Pivot position in renderer y-DOWN coords (0 for HCW/FCW, moves for FAT)
     const actualPivot = worldToScreen(this.viewport, 0, geometry.pivotY ?? 0);
 
-    const armStart = worldToScreen(this.viewport, geometry.counterweightAttach.x, geometry.counterweightAttach.y);
-    const armEnd = worldToScreen(this.viewport, geometry.slingAttach.x, geometry.slingAttach.y);
-    const weight = worldToScreen(this.viewport, geometry.counterweight.x, geometry.counterweight.y);
-    const projectile = worldToScreen(this.viewport, sample.projectileX, sample.projectileY);
+    const armStart = clampAtGround(worldToScreen(this.viewport, geometry.counterweightAttach.x, geometry.counterweightAttach.y));
+    const armEnd = clampAtGround(worldToScreen(this.viewport, geometry.slingAttach.x, geometry.slingAttach.y));
+    const weight = clampAtGround(worldToScreen(this.viewport, geometry.counterweight.x, geometry.counterweight.y));
+    const projectile = clampAtGround(worldToScreen(this.viewport, sample.projectileX, sample.projectileY));
 
-    drawTrail(ctx, this.viewport, trailSource, sample.time);
+    drawTrail(ctx, this.viewport, trailSource, sample.time, params.h);
 
     ctx.save();
     ctx.strokeStyle = '#e2e8f0';
@@ -193,11 +196,11 @@ export class TrebuchetRenderer {
 
     const slingTip =
       sample.stage === 'flight'
-        ? worldToScreen(
+        ? clampAtGround(worldToScreen(
             this.viewport,
             geometry.slingAttach.x - params.LS * Math.sin(sample.Aq + sample.Sq),
             geometry.slingAttach.y - params.LS * Math.cos(sample.Aq + sample.Sq),
-          )
+          ))
         : projectile;
 
     ctx.strokeStyle = '#f8fafc';
@@ -213,10 +216,10 @@ export class TrebuchetRenderer {
     drawHud(ctx, sample, params, canvas);
 
     // Picture-in-Picture inset: show zoomed mechanism when main view is zoomed out
-    this.drawPiP(params, sample, frameHeightPx);
+    this.drawPiP(params, sample, frameHeightPx, trailSource);
   }
 
-  private drawPiP(params: TrebuchetParams, sample: SimulationSample, mainFrameHeightPx: number): void {
+  private drawPiP(params: TrebuchetParams, sample: SimulationSample, mainFrameHeightPx: number, trailSource: SimulationSample[]): void {
     // Only show PiP when mechanism is too small in main view (< 15% of canvas height)
     const mechTooSmall = mainFrameHeightPx < this.canvas.height * 0.15;
     if (!mechTooSmall) return;
@@ -298,6 +301,12 @@ export class TrebuchetRenderer {
     ctx.lineTo(pipX + pipW, pipGroundY);
     ctx.stroke();
 
+    // Ground clamp for PiP: no element renders below ground
+    const pipClamp = (pt: { x: number; y: number }) => ({ x: pt.x, y: Math.min(pt.y, pipGroundY) });
+
+    // Draw trail in PiP
+    drawTrail(ctx, pipViewport, trailSource, sample.time, params.h);
+
     // Scale element sizes for PiP
     const pipFrameH = params.h * pipScale;
     const pArmW = Math.max(2, pipFrameH * 0.03);
@@ -350,10 +359,10 @@ export class TrebuchetRenderer {
     ctx.stroke();
 
     // Arm
-    const pipArmStart = worldToScreen(pipViewport, geometry.counterweightAttach.x, geometry.counterweightAttach.y);
-    const pipArmEnd = worldToScreen(pipViewport, geometry.slingAttach.x, geometry.slingAttach.y);
-    const pipWeight = worldToScreen(pipViewport, geometry.counterweight.x, geometry.counterweight.y);
-    const pipProj = worldToScreen(pipViewport, sample.projectileX, sample.projectileY);
+    const pipArmStart = pipClamp(worldToScreen(pipViewport, geometry.counterweightAttach.x, geometry.counterweightAttach.y));
+    const pipArmEnd = pipClamp(worldToScreen(pipViewport, geometry.slingAttach.x, geometry.slingAttach.y));
+    const pipWeight = pipClamp(worldToScreen(pipViewport, geometry.counterweight.x, geometry.counterweight.y));
+    const pipProj = pipClamp(worldToScreen(pipViewport, sample.projectileX, sample.projectileY));
 
     ctx.strokeStyle = '#e2e8f0';
     ctx.lineWidth = pArmW;
@@ -372,9 +381,9 @@ export class TrebuchetRenderer {
 
     // Sling
     const pipSlingTip = sample.stage === 'flight'
-      ? worldToScreen(pipViewport,
+      ? pipClamp(worldToScreen(pipViewport,
           geometry.slingAttach.x - params.LS * Math.sin(sample.Aq + sample.Sq),
-          geometry.slingAttach.y - params.LS * Math.cos(sample.Aq + sample.Sq))
+          geometry.slingAttach.y - params.LS * Math.cos(sample.Aq + sample.Sq)))
       : pipProj;
     ctx.strokeStyle = '#f8fafc';
     ctx.beginPath();
@@ -386,9 +395,7 @@ export class TrebuchetRenderer {
     const pipActualPivot = worldToScreen(pipViewport, 0, geometry.pivotY ?? 0);
     drawPivot(ctx, pipActualPivot, pPivotR);
     drawCounterweight(ctx, pipWeight, pCwSize);
-    if (sample.stage !== 'flight') {
-      drawProjectile(ctx, pipProj, pProjR);
-    }
+    drawProjectile(ctx, pipProj, pProjR);
 
     ctx.restore();
   }
@@ -532,7 +539,7 @@ function drawProjectile(ctx: CanvasRenderingContext2D, point: { x: number; y: nu
   ctx.restore();
 }
 
-function drawTrail(ctx: CanvasRenderingContext2D, viewport: Viewport, samples: SimulationSample[], time: number): void {
+function drawTrail(ctx: CanvasRenderingContext2D, viewport: Viewport, samples: SimulationSample[], time: number, groundWorldY: number): void {
   const relevant = samples.filter((sample) => sample.time <= time);
   if (relevant.length < 2) {
     return;
@@ -550,16 +557,20 @@ function drawTrail(ctx: CanvasRenderingContext2D, viewport: Viewport, samples: S
     trail.push(relevant[relevant.length - 1]);
   }
 
+  const groundScreenY = worldToScreen(viewport, 0, groundWorldY).y;
+
   ctx.save();
   ctx.strokeStyle = 'rgba(251, 113, 133, 0.45)';
   ctx.lineWidth = 2;
   ctx.beginPath();
   trail.forEach((sample, index) => {
     const point = worldToScreen(viewport, sample.projectileX, sample.projectileY);
+    // Clamp to ground — never draw trail below ground line
+    const y = Math.min(point.y, groundScreenY);
     if (index === 0) {
-      ctx.moveTo(point.x, point.y);
+      ctx.moveTo(point.x, y);
     } else {
-      ctx.lineTo(point.x, point.y);
+      ctx.lineTo(point.x, y);
     }
   });
   ctx.stroke();
