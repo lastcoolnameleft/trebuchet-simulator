@@ -13,6 +13,8 @@ export class TrebuchetRenderer {
   private viewport: Viewport = { scale: 40, originX: 180, originY: 160 };
   private currentResult: SimulationResult | null = null;
   private geometryFn: GeometryFunction = computeTrebuchetGeometry;
+  // Fixed PiP bounds computed once from all pre-launch frames
+  private pipBounds: { minX: number; maxX: number; minY: number; maxY: number } | null = null;
 
   constructor(private readonly canvas: HTMLCanvasElement) {
     const context = canvas.getContext('2d');
@@ -30,7 +32,37 @@ export class TrebuchetRenderer {
     this.currentResult = result;
     if (result) {
       this.viewport = computeViewport(this.canvas, result, this.geometryFn);
+      this.pipBounds = this.computePipBounds(result);
     }
+  }
+
+  private computePipBounds(result: SimulationResult): { minX: number; maxX: number; minY: number; maxY: number } {
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    // Sample every few pre-launch frames to find the full mechanism extent
+    const preLaunch = result.samples.filter(s => s.stage !== 'flight');
+    const step = Math.max(1, Math.floor(preLaunch.length / 30));
+    for (let i = 0; i < preLaunch.length; i += step) {
+      const geom = this.geometryFn(result.params, preLaunch[i]);
+      const points = [geom.counterweight, geom.counterweightAttach, geom.slingAttach, geom.projectile, { x: 0, y: 0 }, { x: 0, y: result.params.h }];
+      for (const p of points) {
+        minX = Math.min(minX, p.x);
+        maxX = Math.max(maxX, p.x);
+        minY = Math.min(minY, p.y);
+        maxY = Math.max(maxY, p.y);
+      }
+    }
+    // Always include last pre-launch frame
+    if (preLaunch.length > 0) {
+      const geom = this.geometryFn(result.params, preLaunch[preLaunch.length - 1]);
+      const points = [geom.counterweight, geom.counterweightAttach, geom.slingAttach, geom.projectile, { x: 0, y: 0 }, { x: 0, y: result.params.h }];
+      for (const p of points) {
+        minX = Math.min(minX, p.x);
+        maxX = Math.max(maxX, p.x);
+        minY = Math.min(minY, p.y);
+        maxY = Math.max(maxY, p.y);
+      }
+    }
+    return { minX, maxX, minY, maxY };
   }
 
   drawPreview(params: TrebuchetParams, sample: SimulationSample): void {
@@ -179,6 +211,186 @@ export class TrebuchetRenderer {
     drawCounterweight(ctx, weight, cwSize);
     drawProjectile(ctx, projectile, projRadius);
     drawHud(ctx, sample, params, canvas);
+
+    // Picture-in-Picture inset: show zoomed mechanism when main view is zoomed out
+    this.drawPiP(params, sample, frameHeightPx);
+  }
+
+  private drawPiP(params: TrebuchetParams, sample: SimulationSample, mainFrameHeightPx: number): void {
+    // Only show PiP when mechanism is too small in main view (< 15% of canvas height)
+    const mechTooSmall = mainFrameHeightPx < this.canvas.height * 0.15;
+    if (!mechTooSmall) return;
+
+    const { ctx, canvas } = this;
+    const geometry = this.geometryFn(params, sample);
+
+    // PiP dimensions and position (bottom-right corner)
+    const pipW = Math.round(canvas.width * 0.28);
+    const pipH = Math.round(canvas.height * 0.35);
+    const pipX = canvas.width - pipW - 12;
+    const pipY = canvas.height - pipH - 12;
+
+    // Use precomputed fixed bounds so the viewport doesn't shift frame-to-frame
+    let minX: number, maxX: number, minY: number, maxY: number;
+    if (this.pipBounds) {
+      minX = this.pipBounds.minX;
+      maxX = this.pipBounds.maxX;
+      minY = this.pipBounds.minY;
+      maxY = this.pipBounds.maxY;
+    } else {
+      const points = [
+        geometry.counterweight,
+        geometry.counterweightAttach,
+        geometry.slingAttach,
+        geometry.projectile,
+        { x: 0, y: 0 },
+        { x: 0, y: params.h },
+      ];
+      minX = Infinity; maxX = -Infinity; minY = Infinity; maxY = -Infinity;
+      for (const p of points) {
+        minX = Math.min(minX, p.x);
+        maxX = Math.max(maxX, p.x);
+        minY = Math.min(minY, p.y);
+        maxY = Math.max(maxY, p.y);
+      }
+    }
+    const mechW = maxX - minX;
+    const mechH = maxY - minY;
+    // Add padding (40% around mechanism)
+    const pad = Math.max(mechW, mechH) * 0.4;
+    minX -= pad; maxX += pad;
+    minY -= pad; maxY += pad;
+    // Ensure ground is visible
+    maxY = Math.max(maxY, params.h + pad * 0.3);
+
+    const vpW = maxX - minX;
+    const vpH = maxY - minY;
+    const pipScale = Math.min((pipW - 16) / vpW, (pipH - 16) / vpH);
+    const pipViewport: Viewport = {
+      scale: pipScale,
+      originX: pipX + 8 - minX * pipScale,
+      originY: pipY + 8 - minY * pipScale,
+    };
+
+    // Draw PiP background
+    ctx.save();
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+    ctx.strokeStyle = 'rgba(148, 163, 184, 0.5)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.roundRect(pipX, pipY, pipW, pipH, 6);
+    ctx.fill();
+    ctx.stroke();
+
+    // Clip to PiP region
+    ctx.beginPath();
+    ctx.rect(pipX, pipY, pipW, pipH);
+    ctx.clip();
+
+    // Draw ground in PiP
+    const pipGroundY = pipViewport.originY + params.h * pipViewport.scale;
+    ctx.fillStyle = '#1a5c2a';
+    ctx.fillRect(pipX, pipGroundY, pipW, pipH - (pipGroundY - pipY));
+    ctx.strokeStyle = '#6ee7b7';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(pipX, pipGroundY);
+    ctx.lineTo(pipX + pipW, pipGroundY);
+    ctx.stroke();
+
+    // Scale element sizes for PiP
+    const pipFrameH = params.h * pipScale;
+    const pArmW = Math.max(2, pipFrameH * 0.03);
+    const pPostW = Math.max(2, pipFrameH * 0.04);
+    const pCwSize = Math.max(5, pipFrameH * 0.1);
+    const pProjR = Math.max(3, pipFrameH * 0.04);
+    const pPivotR = Math.max(2, pipFrameH * 0.025);
+
+    // Draw tracks in PiP
+    if (geometry.tracks) {
+      ctx.strokeStyle = '#6b7280';
+      ctx.lineWidth = Math.max(1, pipFrameH * 0.012);
+      ctx.setLineDash([Math.max(2, pipFrameH * 0.015), Math.max(1, pipFrameH * 0.012)]);
+      if (geometry.tracks.vertical) {
+        const vt = geometry.tracks.vertical;
+        const vtTop = worldToScreen(pipViewport, vt.x, vt.yTop);
+        const vtBot = worldToScreen(pipViewport, vt.x, vt.yBottom);
+        const rg = Math.max(2, pipFrameH * 0.02);
+        ctx.beginPath();
+        ctx.moveTo(vtTop.x - rg, vtTop.y); ctx.lineTo(vtBot.x - rg, vtBot.y);
+        ctx.moveTo(vtTop.x + rg, vtTop.y); ctx.lineTo(vtBot.x + rg, vtBot.y);
+        ctx.stroke();
+      }
+      if (geometry.tracks.horizontal) {
+        const ht = geometry.tracks.horizontal;
+        const pinP = worldToScreen(pipViewport, ht.x, ht.y);
+        const slotE = worldToScreen(pipViewport, ht.x + ht.length, ht.y);
+        const sg = Math.max(1, pipFrameH * 0.012);
+        ctx.beginPath();
+        ctx.moveTo(pinP.x, pinP.y - sg); ctx.lineTo(slotE.x, slotE.y - sg);
+        ctx.moveTo(pinP.x, pinP.y + sg); ctx.lineTo(slotE.x, slotE.y + sg);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = '#9ca3af';
+        ctx.beginPath();
+        ctx.arc(pinP.x, pinP.y, Math.max(2, pipFrameH * 0.015), 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.setLineDash([]);
+    }
+
+    // Frame post
+    const pipPivot = worldToScreen(pipViewport, 0, 0);
+    ctx.strokeStyle = '#a87c4f';
+    ctx.lineWidth = pPostW;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(pipPivot.x, pipGroundY);
+    ctx.lineTo(pipPivot.x, pipPivot.y);
+    ctx.stroke();
+
+    // Arm
+    const pipArmStart = worldToScreen(pipViewport, geometry.counterweightAttach.x, geometry.counterweightAttach.y);
+    const pipArmEnd = worldToScreen(pipViewport, geometry.slingAttach.x, geometry.slingAttach.y);
+    const pipWeight = worldToScreen(pipViewport, geometry.counterweight.x, geometry.counterweight.y);
+    const pipProj = worldToScreen(pipViewport, sample.projectileX, sample.projectileY);
+
+    ctx.strokeStyle = '#e2e8f0';
+    ctx.lineWidth = pArmW;
+    ctx.beginPath();
+    ctx.moveTo(pipArmStart.x, pipArmStart.y);
+    ctx.lineTo(pipArmEnd.x, pipArmEnd.y);
+    ctx.stroke();
+
+    // CW rod
+    ctx.strokeStyle = '#cbd5e1';
+    ctx.lineWidth = Math.max(1, pipFrameH * 0.015);
+    ctx.beginPath();
+    ctx.moveTo(pipArmStart.x, pipArmStart.y);
+    ctx.lineTo(pipWeight.x, pipWeight.y);
+    ctx.stroke();
+
+    // Sling
+    const pipSlingTip = sample.stage === 'flight'
+      ? worldToScreen(pipViewport,
+          geometry.slingAttach.x - params.LS * Math.sin(sample.Aq + sample.Sq),
+          geometry.slingAttach.y - params.LS * Math.cos(sample.Aq + sample.Sq))
+      : pipProj;
+    ctx.strokeStyle = '#f8fafc';
+    ctx.beginPath();
+    ctx.moveTo(pipArmEnd.x, pipArmEnd.y);
+    ctx.lineTo(pipSlingTip.x, pipSlingTip.y);
+    ctx.stroke();
+
+    // Pivot, CW, Projectile
+    const pipActualPivot = worldToScreen(pipViewport, 0, geometry.pivotY ?? 0);
+    drawPivot(ctx, pipActualPivot, pPivotR);
+    drawCounterweight(ctx, pipWeight, pCwSize);
+    if (sample.stage !== 'flight') {
+      drawProjectile(ctx, pipProj, pProjR);
+    }
+
+    ctx.restore();
   }
 }
 
